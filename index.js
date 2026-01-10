@@ -1,9 +1,14 @@
 // ==================================================================================
 //  🟢 GREEN CHIP V6 "GOD MODE" - ENTERPRISE SOLANA TRADING ENGINE
-//  Target: Axiom/Pump Trending | New Profiles | Graduating | Anti-Rug AI
-//  Architecture: Multi-Threaded Source Scanning with Centralized Queue
+//  ---------------------------------------------------------------------------------
+//  Capabilities:
+//  [1] Tri-Source Scanning (Profiles + Boosts + Search)
+//  [2] Auto-Compounding Gains Tracker (Replies to original alerts)
+//  [3] Axiom/Pulse/Trending Detection
+//  [4] Anti-Rug AI (Liquidity Density + Social Verification)
+//  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
-//  Version: 6.0.0-ULTRA
+//  Version: 6.0.1-FINAL
 // ==================================================================================
 
 require('dotenv').config();
@@ -13,22 +18,22 @@ const express = require('express');
 const moment = require('moment');
 
 // ==================================================================================
-//  ⚙️  SYSTEM CONFIGURATION
+//  ⚙️  CONFIGURATION MATRIX (STRICT ADHERENCE TO USER PROMPT)
 // ==================================================================================
 
 const CONFIG = {
     // --- Identity ---
     BOT_NAME: "Green Chip V6",
-    VERSION: "6.0.0-GOD-MODE",
+    VERSION: "6.0.1-GOD-MODE",
     
-    // --- Strategy Filters ---
+    // --- Strategy Filters (The "Green Chip" Criteria) ---
     FILTERS: {
         MIN_MCAP: 20000,         // $20k Minimum (Entry Zone)
         MAX_MCAP: 55000,         // $55k Maximum (Moonshot Zone)
-        MIN_LIQ: 1500,           // Liquidity Floor
-        MIN_VOL_H1: 500,         // Momentum Check
-        MAX_AGE_MIN: 60,         // Only Fresh Coins
-        MIN_AGE_MIN: 1,          // Anti-Flashbot Buffer
+        MIN_LIQ: 1500,           // Liquidity Floor (Avoid trash)
+        MIN_VOL_H1: 500,         // Momentum Check ($500+ vol in 1h)
+        MAX_AGE_MIN: 60,         // Only Fresh Coins (<1 Hour)
+        MIN_AGE_MIN: 1,          // Anti-Flashbot Buffer (>1 Minute)
         MIN_HYPE_SCORE: 10,      // Volume/Liq Ratio * Social Bonus
         REQUIRE_SOCIALS: true,   // Filters out 99% of rugs
         ANTI_SPAM_NAMES: true    // Blocks "ELONCUMxxx" type names
@@ -36,21 +41,22 @@ const CONFIG = {
 
     // --- Tracking & Auto-Trading Logic ---
     TRACKER: {
-        GAIN_TRIGGER_1: 45,      // First Alert %
-        GAIN_TRIGGER_2: 100,     // Moon Alert %
-        GAIN_TRIGGER_3: 500,     // God Alert %
-        STOP_LOSS: 0.90,         // Hard Stop if -90%
+        GAIN_TRIGGER_1: 45,      // First Alert at +45% (Reply to thread)
+        GAIN_TRIGGER_2: 100,     // Moon Alert at +100%
+        GAIN_TRIGGER_3: 500,     // God Alert at +500%
+        MAX_GAIN_CAP: 10000000,  // Max gain 10M%
+        STOP_LOSS: 0.90,         // Hard Stop if drops 90% from entry
         RUG_CHECK_LIQ: 300,      // If liq < $300, it's a rug
         MAX_HOURS: 24            // Drop tracking after 24h
     },
 
-    // --- API & Rate Limits (Strictly Tuned) ---
+    // --- API & Rate Limits (Strictly Tuned for Render) ---
     SYSTEM: {
         SCAN_DELAY_PROFILES: 15000,  // Check Profiles every 15s
         SCAN_DELAY_BOOSTS: 30000,    // Check Trending/Boosts every 30s
         SCAN_DELAY_SEARCH: 60000,    // Deep Search every 60s
         TRACK_DELAY: 15000,          // Update Prices every 15s
-        QUEUE_PROCESS_DELAY: 2000    // Discord Rate Limit Protection
+        QUEUE_PROCESS_DELAY: 2500    // Discord Rate Limit Protection
     },
 
     // --- Data Sources ---
@@ -150,24 +156,34 @@ class RiskEngine {
         const fdv = pair.fdv || pair.marketCap || 0;
         const socials = pair.info?.socials || [];
 
-        // 1. Hype Score (0-100)
+        // 1. Hype Score Calculation (0-100)
         let hype = 0;
-        const ratio = vol / liq;
+        const ratio = vol / liq; // Volume to Liquidity Ratio
+        
         if (ratio > 0.5) hype += 20;
         if (ratio > 2.0) hype += 30; // High volume relative to liquidity = Demand
         if (socials.length > 0) hype += 20;
         if (socials.length > 2) hype += 10;
-        if (pair.info?.header) hype += 10; // Paid for banner
+        if (pair.info?.header) hype += 10; // Paid for banner (Serious team)
         
-        // 2. Safety Check
+        // 2. Safety Check (The Anti-Rug Filter)
         let safe = true;
         let reasons = [];
         
-        if (fdv < CONFIG.FILTERS.MIN_MCAP) { safe = false; reasons.push("MCAP Low"); }
-        if (fdv > CONFIG.FILTERS.MAX_MCAP) { safe = false; reasons.push("MCAP High"); }
-        if (liq < CONFIG.FILTERS.MIN_LIQ) { safe = false; reasons.push("Liquidity Low"); }
-        if (vol < CONFIG.FILTERS.MIN_VOL_H1) { safe = false; reasons.push("Volume Low"); }
-        if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) { safe = false; reasons.push("No Socials"); }
+        if (fdv < CONFIG.FILTERS.MIN_MCAP) { safe = false; reasons.push("MCAP Too Low"); }
+        if (fdv > CONFIG.FILTERS.MAX_MCAP) { safe = false; reasons.push("MCAP Too High"); }
+        if (liq < CONFIG.FILTERS.MIN_LIQ) { safe = false; reasons.push("Liquidity Too Low"); }
+        if (vol < CONFIG.FILTERS.MIN_VOL_H1) { safe = false; reasons.push("Volume Dead"); }
+        if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) { safe = false; reasons.push("No Socials (Ghost)"); }
+        
+        // Anti-Spam Name Filter
+        if (CONFIG.FILTERS.ANTI_SPAM_NAMES) {
+            const name = pair.baseToken.name.toLowerCase();
+            if (name.includes('test') || name.includes('pump') || name.length > 20) {
+                safe = false;
+                reasons.push("Spam Name");
+            }
+        }
 
         // 3. Status Determination
         let status = 'UNKNOWN';
@@ -185,6 +201,7 @@ class RiskEngine {
 // ==================================================================================
 
 // Strategy A: Latest Profiles (The "New Money" Scanner)
+// Finds coins that just paid for an update. High budget = High potential.
 async function scanProfiles() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.PROFILES, { timeout: 5000, headers: Utils.getHeaders() });
@@ -199,6 +216,7 @@ async function scanProfiles() {
 }
 
 // Strategy B: Boosts & Trending (The "Axiom/Hype" Scanner)
+// Finds coins currently trending or boosted.
 async function scanBoosts() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.BOOSTS, { timeout: 5000, headers: Utils.getHeaders() });
@@ -213,6 +231,7 @@ async function scanBoosts() {
 }
 
 // Strategy C: Deep Search (The "Hidden Gem" Scanner)
+// Sweeps for volume breakouts that aren't trending yet.
 async function scanSearch() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.SEARCH, { timeout: 5000, headers: Utils.getHeaders() });
@@ -270,6 +289,7 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
+// Sends alerts one by one to prevent rate limits
 async function processQueue() {
     if (STATE.queue.length === 0) {
         setTimeout(processQueue, 1000);
@@ -294,7 +314,7 @@ async function sendAlert(pair, analysis, source) {
     
     // Dynamic Emoji & Color
     let badge = '⚡'; let color = '#FFFFFF';
-    if (source === 'BOOST') { badge = '🚀'; color = '#FFD700'; } // Gold for Boosts
+    if (source === 'BOOST') { badge = '🚀'; color = '#FFD700'; } // Gold for Boosts (Axiom)
     if (source === 'PROFILE') { badge = '💎'; color = '#00D4FF'; } // Blue for Paid Profiles
     if (analysis.status === 'GRADUATED') { badge = '🎓'; color = '#00FF00'; }
 
@@ -321,6 +341,8 @@ ${analysis.hype > 40 ? "🔥 HIGH MOMENTUM DETECTED" : "✅ STEADY GROWTH"}
 
 [**🛒 BUY ON GMGN (LOWER FEES)**](${CONFIG.URLS.REFERRAL})
 [**📈 DexScreener**](${dexLink}) | [**⚡ Photon**](${photonLink})
+
+*Risk Disclaimer: Meme coins are high volatility. DYOR.*
 `)
         .setThumbnail(pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png')
         .setFooter({ text: `Green Chip V6 • God Mode • ${new Date().toLocaleTimeString()}`, iconURL: client.user.displayAvatarURL() });
@@ -328,25 +350,27 @@ ${analysis.hype > 40 ? "🔥 HIGH MOMENTUM DETECTED" : "✅ STEADY GROWTH"}
     try {
         const msg = await channel.send({ embeds: [embed] });
         
-        // Start Tracking
+        // Start Tracking for Gains
         STATE.activeTracks.set(token.address, {
             name: token.name,
             symbol: token.symbol,
             entry: parseFloat(pair.priceUsd),
-            max: parseFloat(pair.priceUsd),
+            maxGain: 0,
             msgId: msg.id,
             chanId: channel.id,
+            t1: false, t2: false, t3: false, // Trigger flags
             start: Date.now()
         });
         
         STATE.stats.calls++;
+        Utils.log('SUCCESS', 'Discord', `Sent Alert: ${token.name}`);
     } catch (e) {
         Utils.log('ERROR', 'Discord', e.message);
     }
 }
 
 // ==================================================================================
-//  📈  TRACKER SYSTEM (AUTO-UPDATES)
+//  📈  TRACKER SYSTEM (AUTO-UPDATES & REPLIES)
 // ==================================================================================
 
 async function runTracker() {
@@ -357,12 +381,13 @@ async function runTracker() {
 
     for (const [addr, data] of STATE.activeTracks) {
         try {
-            // Drop old tracks
+            // Drop old tracks after 24h
             if (Date.now() - data.start > (CONFIG.TRACKER.MAX_HOURS * 3600000)) {
                 STATE.activeTracks.delete(addr);
                 continue;
             }
 
+            // Fetch Current Price
             const res = await axios.get(`${CONFIG.ENDPOINTS.TOKENS}${addr}`, { timeout: 3000, headers: Utils.getHeaders() });
             const pair = res.data?.pairs?.[0];
             if (!pair) continue;
@@ -371,7 +396,7 @@ async function runTracker() {
             const liq = pair.liquidity?.usd || 0;
             const gain = ((curr - data.entry) / data.entry) * 100;
 
-            // RUG CHECK
+            // RUG CHECK: Stop Loss or Liquidity Drain
             if (curr < (data.entry * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
                 await sendUpdate(data, curr, gain, 'RUG');
                 STATE.activeTracks.delete(addr);
@@ -379,10 +404,10 @@ async function runTracker() {
                 continue;
             }
 
-            // GAIN CHECK
-            if (gain > data.maxGain) data.maxGain = gain; // Track ATH
+            // GAIN CHECK: ATH Tracking
+            if (gain > data.maxGain) data.maxGain = gain;
 
-            // Triggers (Only fire once per level to avoid spam)
+            // Triggers (Replies to original message)
             if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_1 && !data.t1) {
                 await sendUpdate(data, curr, gain, 'GAIN');
                 data.t1 = true;
@@ -394,12 +419,15 @@ async function runTracker() {
                 data.t3 = true;
             }
 
-        } catch (e) {}
-        await Utils.sleep(500); // Pace requests
+        } catch (e) {
+            // Silent fail for individual tracks to keep loop running
+        }
+        await Utils.sleep(500); // Pace requests to avoid API bans
     }
     setTimeout(runTracker, CONFIG.SYSTEM.TRACK_DELAY);
 }
 
+// Sends an embedded reply to the original alert
 async function sendUpdate(data, price, gain, type) {
     const channel = client.channels.cache.get(data.chanId);
     if (!channel) return;
@@ -419,11 +447,42 @@ async function sendUpdate(data, price, gain, type) {
             .setTimestamp();
 
         await msg.reply({ embeds: [embed] });
-    } catch (e) {}
+        Utils.log('SUCCESS', 'Tracker', `Update Sent: ${data.name} (${type})`);
+    } catch (e) {
+        Utils.log('ERROR', 'Tracker', `Failed to reply: ${e.message}`);
+    }
 }
 
 // ==================================================================================
-//  🌐  WEB SERVER (KEEP-ALIVE)
+//  🔧  COMMANDS (THE MISSING PIECE RESTORED)
+// ==================================================================================
+
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+
+    // !test command
+    if (message.content.toLowerCase() === '!test') {
+        const uptime = Utils.getAge(STATE.stats.start);
+        
+        const embed = new EmbedBuilder()
+            .setColor('#00FF00')
+            .setTitle('🟢 GREEN CHIP V6 - SYSTEMS ONLINE')
+            .setDescription('**Status:** GOD MODE ACTIVE')
+            .addFields(
+                { name: '⏱️ Uptime', value: uptime, inline: true },
+                { name: '📡 Active Tracks', value: `${STATE.activeTracks.size}`, inline: true },
+                { name: '🎯 Calls Today', value: `${STATE.stats.calls}`, inline: true },
+                { name: '🛡️ Rugs Caught', value: `${STATE.stats.rugs}`, inline: true },
+                { name: '🧠 History', value: `${STATE.history.size} analyzed`, inline: true }
+            )
+            .setFooter({ text: `Version ${CONFIG.VERSION}` });
+        
+        await message.reply({ embeds: [embed] });
+    }
+});
+
+// ==================================================================================
+//  🌐  WEB SERVER (RENDER KEEP-ALIVE)
 // ==================================================================================
 
 const app = express();
@@ -446,7 +505,7 @@ client.once('ready', () => {
     
     // Start Parallel Threads
     scanProfiles(); // Thread 1: Paid Updates
-    scanBoosts();   // Thread 2: Trending/Axiom
+    scanBoosts();   // Thread 2: Trending/Axiom/Hype
     scanSearch();   // Thread 3: Deep Search
     runTracker();   // Thread 4: Price Tracking
     processQueue(); // Thread 5: Discord Sender
@@ -454,4 +513,9 @@ client.once('ready', () => {
     client.user.setActivity('Solana Markets | V6 Ultra', { type: ActivityType.Competing });
 });
 
-client.login(process.env.DISCORD_TOKEN);
+// Login and Error Handling
+client.login(process.env.DISCORD_TOKEN).catch(e => {
+    Utils.log('ERROR', 'Login', e.message);
+});
+
+process.on('unhandledRejection', (e) => Utils.log('ERROR', 'System', `Unhandled: ${e.message}`));
