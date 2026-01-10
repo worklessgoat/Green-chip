@@ -1,7 +1,7 @@
 {
 “name”: “green-chip-bot-v3”,
 “version”: “3.0.0”,
-“description”: “Professional Solana meme coin scanner for Discord”,
+“description”: “Professional Solana meme coin scanner”,
 “main”: “index.js”,
 “scripts”: {
 “start”: “node index.js”
