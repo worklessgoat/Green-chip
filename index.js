@@ -2,10 +2,10 @@ const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
 
-// --- SERVER SETUP (Keeps bot alive on Render) ---
+// --- SERVER (Keeps bot alive) ---
 const app = express();
-app.get('/', (req, res) => res.send('Green Chip Bot is Online! 🟢'));
-app.listen(3000, () => console.log('Web server ready.'));
+app.get('/', (req, res) => res.send('Green Chip SNIPER is Live 🟢'));
+app.listen(3000, () => console.log('Server ready.'));
 
 // --- BOT CONFIG ---
 const client = new Client({
@@ -17,154 +17,124 @@ const client = new Client({
 });
 
 // MEMORY
-const activeCalls = new Map();
+const activeCalls = new Set();
 
-// FILTERS
-const MIN_MCAP = 20000;
-const MAX_MCAP = 55000;
-const MIN_LIQUIDITY = 1500;
-const MIN_GAIN_TO_ALERT = 45; 
+// --- ⚙️ SNIPER SETTINGS (The "Moon Shot" Zone) ---
+const MIN_MCAP = 4000;         // Catch them extremely early ($4k)
+const MAX_MCAP = 90000;        // Stop calling after $90k (Too late)
+const MIN_LIQUIDITY = 1000;    // Must have $1k+ backing
+const MIN_VOL_H1 = 500;        // Must be trading actively NOW
+const REQUIRE_SOCIALS = true;  // MUST have Twitter/Telegram to be called
 
 // --- 1. LOGIN & START ---
 client.once('ready', () => {
     console.log(`✅ LOGGED IN AS: ${client.user.tag}`);
-    console.log(`waiting for !test command or market data...`);
+    console.log(`🔫 SNIPER MODE: $4k - $90k MCap | Socials Only`);
     
-    // Start the automatic cycles
-    setInterval(scanForNewCoins, 30000); // Scan every 30s
-    setInterval(trackGains, 45000);      // Track gains every 45s
+    // Fast Scan (Every 15s)
+    setInterval(scanMarket, 15000);
 });
 
-// --- 2. LISTENER FOR !TEST COMMAND ---
+// --- 2. COMMANDS ---
 client.on('messageCreate', async (message) => {
-    // Ignore bot's own messages
     if (message.author.bot) return;
 
-    // If user types "!test"
-    if (message.content === '!test') {
-        console.log('Test command received!');
-        
-        // Create a FAKE coin for demonstration
-        const mockPair = {
-            baseToken: { name: 'TEST COIN', symbol: 'TEST', address: 'So11111111111111111111111111111111111111112' },
-            priceUsd: '0.0025',
-            fdv: 45000,
-            liquidity: { usd: 5000 },
-            volume: { h24: 12000 },
-            pairAddress: 'mock-address'
-        };
-
-        await sendCall(mockPair, message.channel.id);
-        message.reply("✅ Test successful! If you see the embed above, I am working.");
+    // "!force" = PROVE connection by fetching real live data immediately
+    if (message.content === '!force') {
+        message.channel.send("🔍 Fetching LIVE raw market data (Top 3 Newest)...");
+        await forceScan(message.channel.id);
     }
 });
 
-// --- 3. SCANNER LOGIC ---
-async function scanForNewCoins() {
-    console.log('...Scanning Solana Market...');
+// --- 3. THE "SNIPER" SCANNER ---
+async function scanMarket() {
     try {
-        const response = await axios.get('https://api.dexscreener.com/latest/dex/search?q=solana');
-        const pairs = response.data.pairs;
+        // Fetch latest Solana profiles
+        const url = 'https://api.dexscreener.com/latest/dex/search?q=solana';
+        const { data } = await axios.get(url);
+        
+        if (!data.pairs) return;
 
-        if (!pairs) return;
-
-        for (const pair of pairs) {
+        for (const pair of data.pairs) {
             if (pair.chainId !== 'solana') continue;
-            if (activeCalls.has(pair.pairAddress)) continue;
+            if (activeCalls.has(pair.pairAddress)) continue; // Don't repeat calls
 
-            const mcap = pair.fdv || pair.marketCap;
-            const liquidity = pair.liquidity?.usd || 0;
-            const vol = pair.volume?.h24 || 0;
+            // EXTRACT DATA
+            const mcap = pair.fdv || pair.marketCap || 0;
+            const liq = pair.liquidity?.usd || 0;
+            const volH1 = pair.volume?.h1 || 0; // 1-Hour Volume (Momentum)
+            
+            // SOCIAL CHECK (The "Realness" Test)
+            const hasSocials = pair.info?.socials && pair.info.socials.length > 0;
+            const twitter = pair.info?.socials?.find(s => s.type === 'twitter')?.url;
+            const telegram = pair.info?.socials?.find(s => s.type === 'telegram')?.url;
 
-            // STRICT FILTERS
-            if (mcap >= MIN_MCAP && mcap <= MAX_MCAP && liquidity >= MIN_LIQUIDITY && vol > 500) {
-                console.log(`MATCH FOUND: ${pair.baseToken.name}`);
-                await sendCall(pair, process.env.CHANNEL_ID);
+            // --- FILTER LOGIC ---
+            const isGemZone = mcap >= MIN_MCAP && mcap <= MAX_MCAP;
+            const isSafe = liq >= MIN_LIQUIDITY;
+            const isMoving = volH1 >= MIN_VOL_H1;
+            const passesSocials = REQUIRE_SOCIALS ? hasSocials : true;
+
+            if (isGemZone && isSafe && isMoving && passesSocials) {
+                console.log(`🎯 SNIPED: ${pair.baseToken.name}`);
+                await sendAlert(pair, process.env.CHANNEL_ID, twitter, telegram);
+                activeCalls.add(pair.pairAddress);
             }
         }
-    } catch (error) {
-        console.error("Scanner error:", error.message);
+    } catch (err) {
+        console.error("Scan Error:", err.message);
     }
 }
 
-// --- 4. SEND ALERT FUNCTION ---
-async function sendCall(pair, channelId) {
-    const channel = client.channels.cache.get(channelId);
-    if (!channel) {
-        console.log("Channel not found!");
-        return;
+// --- 4. FORCE SCAN (Proof of Work) ---
+async function forceScan(channelId) {
+    try {
+        const { data } = await axios.get('https://api.dexscreener.com/latest/dex/search?q=solana');
+        const top3 = data.pairs.slice(0, 3); // Get top 3 raw results
+        
+        const channel = client.channels.cache.get(channelId);
+        
+        for (const pair of top3) {
+            const mcap = pair.fdv || pair.marketCap || 0;
+            await channel.send(`**LIVE MARKET CHECK:** ${pair.baseToken.name} | MCap: $${mcap.toLocaleString()} | Price: $${pair.priceUsd}`);
+        }
+        await channel.send("✅ **Connection Verified.** Bot is scanning for perfect calls...");
+    } catch (e) {
+        console.error(e);
     }
+}
 
+// --- 5. THE PROFESSIONAL ALERT ---
+async function sendAlert(pair, channelId, twitter, telegram) {
+    const channel = client.channels.cache.get(channelId);
+    if (!channel) return;
+
+    const mcap = pair.fdv || pair.marketCap;
     const price = parseFloat(pair.priceUsd);
+    
+    // Social Links Formatting
+    let socialLinks = "";
+    if (twitter) socialLinks += `[🐦 Twitter](${twitter}) `;
+    if (telegram) socialLinks += `[✈️ Telegram](${telegram})`;
+    if (!socialLinks) socialLinks = "⚠️ No Socials Linked (High Risk)";
 
     const embed = new EmbedBuilder()
-        .setTitle(`🚨 **GREEN CHIP CALL: ${pair.baseToken.name}**`)
-        .setColor('#00FF00')
-        .setDescription(`**High Potential Coin Detected**\nMarket Cap: $${(pair.fdv || pair.marketCap).toLocaleString()}`)
+        .setTitle(`🔫 **SNIPER ALERT: ${pair.baseToken.name}**`)
+        .setColor('#00FF00') // Neon Green
+        .setDescription(`**New Gem Detected in Golden Zone ($4k-$90k)**\n${socialLinks}`)
         .addFields(
+            { name: '💎 Market Cap', value: `$${mcap.toLocaleString()}`, inline: true },
             { name: '💰 Price', value: `$${price}`, inline: true },
-            { name: '💧 Liquidity', value: `$${pair.liquidity.usd.toLocaleString()}`, inline: true },
-            { name: '📝 Contract', value: `\`${pair.baseToken.address}\`` },
-            { name: '⚡ LOWER FEES LINK', value: '[👉 **CLICK TO TRADE ON GMGN**](https://gmgn.ai/r/Greenchip)' }
+            { name: '🌊 Liquidity', value: `$${pair.liquidity.usd.toLocaleString()}`, inline: true },
+            { name: '🔥 1h Volume', value: `$${(pair.volume?.h1 || 0).toLocaleString()}`, inline: true },
+            { name: '⚡ FAST BUY', value: `[👉 **TRADE ON GMGN**](https://gmgn.ai/sol/token/${pair.baseToken.address})` },
+            { name: '📝 Contract', value: `\`${pair.baseToken.address}\`` }
         )
+        .setImage(`https://dd.dexscreener.com/ds-data/tokens/solana/${pair.baseToken.address}.png`) // Auto-fetch token image
+        .setFooter({ text: 'Green Chip • Real-Time Sniper • Verified Socials' })
         .setTimestamp();
 
-    const sentMsg = await channel.send({ embeds: [embed] });
-
-    // Track it
-    if (pair.pairAddress !== 'mock-address') {
-        activeCalls.set(pair.pairAddress, {
-            initialPrice: price,
-            msgId: sentMsg.id,
-            channelId: channel.id,
-            highestGain: 0,
-            address: pair.baseToken.address,
-            name: pair.baseToken.name
-        });
-    }
-}
-
-// --- 5. GAIN TRACKING ---
-async function trackGains() {
-    for (const [pairAddress, data] of activeCalls) {
-        try {
-            const res = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${pairAddress}`);
-            if (!res.data.pairs || res.data.pairs.length === 0) continue;
-
-            const currentPair = res.data.pairs[0];
-            const currentPrice = parseFloat(currentPair.priceUsd);
-            const currentLiq = currentPair.liquidity?.usd || 0;
-
-            if (currentLiq < 100) {
-                activeCalls.delete(pairAddress); // Rugged
-                continue;
-            }
-
-            const gainPct = ((currentPrice - data.initialPrice) / data.initialPrice) * 100;
-
-            if (gainPct >= MIN_GAIN_TO_ALERT && gainPct > data.highestGain) {
-                if (gainPct > (data.highestGain + 20)) { 
-                    data.highestGain = gainPct;
-                    await sendUpdate(data, gainPct, currentPrice);
-                }
-            }
-        } catch (e) { console.error(e.message); }
-    }
-}
-
-async function sendUpdate(data, gainPct, currentPrice) {
-    const channel = client.channels.cache.get(data.channelId);
-    if (!channel) return;
-    try {
-        const originalMsg = await channel.messages.fetch(data.msgId);
-        if (originalMsg) {
-            const gainEmbed = new EmbedBuilder()
-                .setTitle(`🚀 **GAIN UPDATE: +${gainPct.toFixed(2)}%**`)
-                .setColor('#FFD700')
-                .setDescription(`**${data.name}** is pumping!\nCurrent Price: $${currentPrice}\n\n[👉 Check on GMGN](https://gmgn.ai/r/Greenchip)`);
-            await originalMsg.reply({ embeds: [gainEmbed] });
-        }
-    } catch (err) {}
+    await channel.send({ embeds: [embed] });
 }
 
 client.login(process.env.DISCORD_TOKEN);
