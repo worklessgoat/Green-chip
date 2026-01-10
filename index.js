@@ -1,9 +1,9 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActivityType } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
-const moment = require('moment');
+const moment = require('moment'); // For precise age calculation
 
-// --- SERVER (Keeps bot alive 24/7) ---
+// --- SERVER (Keeps bot alive on Render 24/7) ---
 const app = express();
 app.get('/', (req, res) => res.send('🟢 Green Chip GOD MODE is Live'));
 app.listen(3000, () => console.log('✅ Server ready on port 3000'));
@@ -18,16 +18,17 @@ const client = new Client({
 });
 
 // --- MEMORY SYSTEM ---
-const activeCalls = new Map(); // Stores active trades for gain tracking
-const processedCoins = new Set(); // History to ensure we NEVER call the same coin twice
+const activeCalls = new Map(); // Stores data for gain tracking/replies
+const processedCoins = new Set(); // Ensures we NEVER call the same coin twice
 
 // --- ⚙️ "BEST OF THE BEST" SETTINGS ---
-const MIN_MCAP = 20000;         // $20k (Strict Floor)
-const MAX_MCAP = 55000;         // $55k (Strict Ceiling)
-const MIN_LIQUIDITY = 1500;     // $1,500 Min Liquidity (Safety)
-const MAX_AGE_MINUTES = 60;     // 1 Hour Max Age (Newly Minted Only)
-const MIN_VOL_H1 = 500;         // Must have volume
-const REQUIRE_SOCIALS = true;   // MUST have Twitter or Telegram
+// Strictly tuned to your request: $20k-$90k, <1 Hour Old
+const MIN_MCAP = 20000;         
+const MAX_MCAP = 90000;         
+const MIN_LIQUIDITY = 1500;     // Safety floor ($1.5k)
+const MAX_AGE_MINUTES = 60;     // strictly < 1 hour old
+const MIN_VOL_H1 = 500;         // Must be active
+const REQUIRE_SOCIALS = true;   // MUST have Twitter/Telegram (Real Hype Check)
 const REFERRAL_LINK = "https://gmgn.ai/r/Greenchip";
 
 // --- 1. LOGIN & START ---
@@ -35,7 +36,7 @@ client.once('ready', () => {
     console.log(`
 ╔═══════════════════════════════════════╗
 ║   🟢 GREEN CHIP GOD MODE ONLINE 🟢    ║
-║   Target: $20k-$55k | < 1 Hour Old    ║
+║   Target: $20k-$90k | < 1 Hour Old    ║
 ║   Status: SCANNING LIVE MARKET...     ║
 ╚═══════════════════════════════════════╝
     `);
@@ -56,7 +57,7 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // !test - Mock Alert to prove bot is working
+    // !test - Mock Alert to prove bot is online
     if (message.content === '!test') {
         const mockPair = {
             baseToken: { name: 'TEST COIN', symbol: 'TEST', address: 'So11111111111111111111111111111111111111112' },
@@ -69,6 +70,7 @@ client.on('messageCreate', async (message) => {
             dexId: 'raydium'
         };
         await sendAlert(mockPair, message.channel.id, true);
+        message.reply("✅ Bot is online. Use this call to check formatting.");
     }
 });
 
@@ -91,11 +93,12 @@ async function scanMarket() {
             const liq = pair.liquidity?.usd || 0;
             const volH1 = pair.volume?.h1 || 0;
             
-            // 🕒 AGE CALCULATION
+            // 🕒 AGE CALCULATION (Strict 1 Hour Rule)
             const createdAt = pair.pairCreatedAt || now;
             const ageMinutes = (now - createdAt) / (1000 * 60);
 
-            // 🐦 SOCIALS CHECK
+            // 🐦 SOCIALS CHECK (Real Hype Indicator)
+            // We use DexScreener's social data as the "Real/Live" proof.
             const socials = pair.info?.socials || [];
             const hasSocials = socials.length > 0;
 
@@ -148,10 +151,14 @@ async function sendAlert(pair, channelId, isTest) {
     if (website) links += `[🌐 Web](${website})`;
     if (!links) links = "⚠️ **No Socials** (High Risk)";
 
-    // Graduation Status
+    // Graduation Status Logic
     let status = "🟢 **Live Trading**";
     if (pair.dexId === 'raydium') status = "🎓 **Graduated to Raydium**";
-    if (pair.dexId === 'pumpfun') status = "💊 **Pump.fun Ongoing**";
+    if (pair.dexId === 'pumpfun') status = "💊 **Pump.fun Bonding Curve**";
+
+    // Age Display
+    const created = moment(pair.pairCreatedAt);
+    const ageText = created.fromNow(); // e.g., "10 minutes ago"
 
     const embed = new EmbedBuilder()
         .setTitle(`🚀 **GREEN CHIP CALL: ${pair.baseToken.name} ($${pair.baseToken.symbol})**`)
@@ -160,31 +167,32 @@ async function sendAlert(pair, channelId, isTest) {
 **${status}**
 ${links}
 
-**New Low Cap Gem Detected**
-This coin matches our strict $20k-$55k criteria with verified volume and socials.
+**High Upside Potential Detected**
+This coin matches our strict criteria ($20k-$90k) and shows live social activity.
         `)
         .addFields(
             { name: '💎 Market Cap', value: `$${mcap.toLocaleString()}`, inline: true },
             { name: '💰 Price', value: `$${price}`, inline: true },
             { name: '🌊 Liquidity', value: `$${pair.liquidity.usd.toLocaleString()}`, inline: true },
-            { name: '📊 1h Volume', value: `$${(pair.volume?.h1 || 0).toLocaleString()}`, inline: true },
+            { name: '⏱️ Launched', value: `${ageText}`, inline: true },
             { name: '⚡ **QUICK BUY (LOWER FEES)**', value: `👉 [**CLICK HERE TO BUY ON GMGN**](${REFERRAL_LINK})` },
             { name: '📝 Contract Address (CA)', value: `\`${pair.baseToken.address}\`` }
         )
+        // Auto-fetch real token image from DexScreener CDN
         .setThumbnail(pair.info?.imageUrl || 'https://dd.dexscreener.com/ds-data/tokens/solana/' + pair.baseToken.address + '.png')
         .setFooter({ text: isTest ? 'Green Chip • TEST ALERT' : 'Green Chip • Institutional Sniper • 24/7' })
         .setTimestamp();
 
     const msg = await channel.send({ embeds: [embed] });
     
-    // Save Msg ID for replies
+    // Save Msg ID so we can reply to THIS specific message later
     if (!isTest && activeCalls.has(pair.baseToken.address)) {
         const data = activeCalls.get(pair.baseToken.address);
-        data.msgId = msg.id;
+        data.msgId = msg.id; // Critical for "Reply" feature
     }
 }
 
-// --- 5. AUTOMATIC GAIN TRACKER ---
+// --- 5. AUTOMATIC GAIN TRACKER (REPLIES) ---
 async function trackGains() {
     if (activeCalls.size === 0) return;
 
@@ -201,7 +209,7 @@ async function trackGains() {
             const currentLiq = pair.liquidity?.usd || 0;
 
             // 🛑 RUG CHECK: If Drops 90% OR Liquidity < $500
-            const priceDrop = (currentPrice < data.initialPrice * 0.10); // 90% drop
+            const priceDrop = (currentPrice < data.initialPrice * 0.10); // 90% drop from call
             const liqGone = (currentLiq < 500);
 
             if (priceDrop || liqGone) {
@@ -222,8 +230,11 @@ async function trackGains() {
                 }
             }
             
-            // Stop tracking if > 10,000,000%
-            if (gainPct > 10000000) data.isRugged = true; // Stop tracking (Winner)
+            // Stop tracking if > 10,000,000% (Maximum Cap)
+            if (gainPct > 10000000) {
+                 await sendGainReply(data, gainPct, currentPrice, true); // True = Final message
+                 data.isRugged = true; // Stop tracking (Winner)
+            }
 
         } catch (e) {
             console.error(`Tracking Error (${data.name}):`, e.message);
@@ -231,12 +242,13 @@ async function trackGains() {
     }
 }
 
-// --- 6. REPLY WITH GAINS ---
-async function sendGainReply(data, gainPct, currentPrice) {
+// --- 6. REPLY WITH GAINS (THREADED) ---
+async function sendGainReply(data, gainPct, currentPrice, isFinal = false) {
     const channel = client.channels.cache.get(data.channelId);
     if (!channel || !data.msgId) return;
 
     try {
+        // Fetch the ORIGINAL message to reply to it
         const originalMsg = await channel.messages.fetch(data.msgId);
         if (originalMsg) {
             // Choose Color & Emoji based on gain
@@ -254,10 +266,12 @@ Initial Price: $${data.initialPrice}
 
 [👉 **SECURE PROFITS ON GMGN**](${REFERRAL_LINK})
                 `);
+            
+            if (isFinal) embed.setFooter({ text: 'Maximum Tracking Reached (10M%)' });
 
             await originalMsg.reply({ embeds: [embed] });
         }
-    } catch (e) { console.error("Reply failed"); }
+    } catch (e) { console.error("Reply failed - message might be deleted"); }
 }
 
 // --- 7. STOP TRACKING (RUG/CRASH) ---
