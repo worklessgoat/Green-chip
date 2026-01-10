@@ -2,10 +2,10 @@ const { Client, GatewayIntentBits, EmbedBuilder, ActivityType } = require('disco
 const axios = require('axios');
 const express = require('express');
 
-// --- SERVER (Keeps bot alive) ---
+// --- SERVER (Keeps bot alive on Render) ---
 const app = express();
-app.get('/', (req, res) => res.send('🟢 Green Chip SNIPER is Live 24/7'));
-app.listen(3000, () => console.log('✅ Server ready on port 3000'));
+app.get('/', (req, res) => res.send('🟢 Green Chip GOD MODE is Live'));
+app.listen(3000, () => console.log('✅ Web Server Ready'));
 
 // --- BOT CONFIG ---
 const client = new Client({
@@ -17,429 +17,218 @@ const client = new Client({
 });
 
 // --- MEMORY SYSTEM ---
-const activeCalls = new Map(); // Address -> {name, calledAt, initialPrice, mcap, highestGain}
-const ruggedCoins = new Set(); // Track rugged coins to stop updates
+const activeCalls = new Map(); // Stores active trades
+const ruggedCoins = new Set(); // Stores rugged coins to ignore
 
-// --- ⚙️ ELITE SNIPER SETTINGS ---
-const MIN_MCAP = 20000;
-const MAX_MCAP = 55000;
-const MIN_LIQUIDITY = 2500;
-const MIN_VOL_H1 = 800;
-const MIN_VOL_H6 = 3000;
-const REQUIRE_SOCIALS = true;
-const MIN_HOLDERS = 50; // Minimum holders for legitimacy
-const MAX_AGE_HOURS = 72; // Only coins less than 3 days old
+// --- ⚙️ GOD MODE SETTINGS (Tuned for ~20 Calls/Day) ---
+const MIN_MCAP = 15000;       // $15k (Catch them early)
+const MAX_MCAP = 70000;       // $70k (Catch them before they moon)
+const MIN_LIQUIDITY = 1500;   // Safety floor
+const MIN_VOL_H1 = 1000;      // Must have active volume
+const REQUIRE_SOCIALS = true; // MUST have Twitter or Telegram
+const MIN_GAIN_REPLY = 45;    // Reply at +45% gain
 
-// Pump.fun & Raydium Detection
-const PUMPFUN_PROGRAM = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
-const RAYDIUM_PROGRAM = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
-
-// --- 1. LOGIN & INITIALIZATION ---
-client.once('ready', async () => {
+// --- 1. LOGIN & START ---
+client.once('ready', () => {
     console.log(`
 ╔═══════════════════════════════════════╗
-║   🟢 GREEN CHIP SNIPER ACTIVATED 🟢   ║
-║   Bot: ${client.user.tag.padEnd(27)}║
-║   Mode: Ultra High Conviction Calls  ║
-║   Range: $20k - $55k Market Cap      ║
-║   Status: LIVE & HUNTING 24/7        ║
+║   🟢 GREEN CHIP GOD MODE ACTIVE 🟢    ║
+║   Status: HUNTING 24/7                ║
+║   Range: $15k - $70k MCap             ║
 ╚═══════════════════════════════════════╝
     `);
 
-    // Set bot status
-    client.user.setPresence({
-        activities: [{ name: '🎯 Sniping 100x Gems', type: ActivityType.Watching }],
-        status: 'online'
-    });
+    client.user.setActivity('Solana Market 24/7', { type: ActivityType.Watching });
 
-    // Start scanning systems
-    setInterval(scanMarket, 12000); // Fast scan every 12s
-    setInterval(trackGains, 30000); // Update gains every 30s
+    // FAST SCAN (Every 15 seconds)
+    setInterval(scanMarket, 15000);
     
-    console.log('🔍 Market scanner initialized');
-    console.log('📊 Gain tracker initialized');
+    // GAIN TRACKING (Every 45 seconds)
+    setInterval(trackGains, 45000);
 });
 
 // --- 2. COMMANDS ---
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    const content = message.content.toLowerCase();
-
-    // !test - Verify bot is alive
-    if (content === '!test') {
-        const uptime = formatUptime(process.uptime());
-        const embed = new EmbedBuilder()
-            .setColor('#00FF00')
-            .setTitle('✅ Green Chip is ONLINE')
-            .setDescription('**Bot Status: Fully Operational**')
-            .addFields(
-                { name: '⏱️ Uptime', value: uptime, inline: true },
-                { name: '📡 Active Calls', value: `${activeCalls.size}`, inline: true },
-                { name: '🎯 Mode', value: 'Ultra Sniper', inline: true },
-                { name: '💎 MCap Range', value: '$20k - $55k', inline: true },
-                { name: '🔥 Scan Speed', value: '12 seconds', inline: true },
-                { name: '📊 Gain Tracking', value: 'Live (30s)', inline: true }
-            )
-            .setFooter({ text: 'Green Chip • Premium Sniper Bot' })
-            .setTimestamp();
-        
-        await message.channel.send({ embeds: [embed] });
+    // !force - Instantly pulls 3 live coins to prove connection
+    if (message.content === '!force') {
+        message.channel.send("🔍 **Forcing Live Market Scan...**");
+        await forceScan(message.channel.id);
     }
 
-    // !stats - Show performance stats
-    if (content === '!stats') {
-        const totalCalls = activeCalls.size;
-        const ruggedCount = ruggedCoins.size;
-        const activeCount = totalCalls - ruggedCount;
-        
+    // !stats - Show bot health
+    if (message.content === '!stats') {
         const embed = new EmbedBuilder()
-            .setColor('#FFD700')
-            .setTitle('📊 Green Chip Performance')
+            .setColor('#00FF00')
+            .setTitle('📊 Green Chip Stats')
             .addFields(
-                { name: '🎯 Total Calls', value: `${totalCalls}`, inline: true },
-                { name: '✅ Active', value: `${activeCount}`, inline: true },
-                { name: '❌ Rugged', value: `${ruggedCount}`, inline: true }
-            )
-            .setTimestamp();
-        
-        await message.channel.send({ embeds: [embed] });
+                { name: '🟢 Active Trades', value: `${activeCalls.size}`, inline: true },
+                { name: '🔴 Rugs Detected', value: `${ruggedCoins.size}`, inline: true },
+                { name: '⚡ Scan Speed', value: '15s', inline: true }
+            );
+        message.channel.send({ embeds: [embed] });
     }
 });
 
-// --- 3. ELITE MARKET SCANNER ---
+// --- 3. MARKET SCANNER ---
 async function scanMarket() {
     try {
-        // Multi-source data aggregation
-        const dexData = await axios.get('https://api.dexscreener.com/latest/dex/tokens/solana', {
-            timeout: 8000
-        });
+        // Fetch Solana pairs from DexScreener
+        const { data } = await axios.get('https://api.dexscreener.com/latest/dex/search?q=solana');
+        if (!data.pairs) return;
 
-        if (!dexData.data?.pairs) return;
-
-        const now = Date.now();
-
-        for (const pair of dexData.data.pairs) {
+        for (const pair of data.pairs) {
+            // 1. Basic Checks
             if (pair.chainId !== 'solana') continue;
-            if (activeCalls.has(pair.baseToken.address)) continue;
+            if (activeCalls.has(pair.pairAddress)) continue; // Don't call twice
+            if (ruggedCoins.has(pair.pairAddress)) continue;
 
-            // --- DATA EXTRACTION ---
+            // 2. Extract Data
             const mcap = pair.fdv || pair.marketCap || 0;
             const liq = pair.liquidity?.usd || 0;
             const volH1 = pair.volume?.h1 || 0;
-            const volH6 = pair.volume?.h6 || 0;
-            const priceUsd = parseFloat(pair.priceUsd || 0);
             const priceChange = pair.priceChange?.h1 || 0;
             
-            // Age calculation
-            const createdAt = pair.pairCreatedAt || now;
-            const ageHours = (now - createdAt) / (1000 * 60 * 60);
-
-            // Social validation
+            // 3. Socials Check
             const socials = pair.info?.socials || [];
-            const twitter = socials.find(s => s.type === 'twitter')?.url;
-            const telegram = socials.find(s => s.type === 'telegram')?.url;
-            const website = socials.find(s => s.type === 'website')?.url;
-            const hasSocials = socials.length >= 1;
+            const hasTwitter = socials.some(s => s.type === 'twitter');
+            const hasTelegram = socials.some(s => s.type === 'telegram');
+            const hasSocials = hasTwitter || hasTelegram;
 
-            // Holder validation (from pair data if available)
-            const txnCount = (pair.txns?.h1?.buys || 0) + (pair.txns?.h1?.sells || 0);
-            const estimatedHolders = Math.min(txnCount * 0.6, 999); // Estimate
-
-            // --- ELITE FILTERS ---
-            const isInGemZone = mcap >= MIN_MCAP && mcap <= MAX_MCAP;
+            // --- 4. THE FILTER LOGIC ---
+            const isGemZone = mcap >= MIN_MCAP && mcap <= MAX_MCAP;
             const isSafe = liq >= MIN_LIQUIDITY;
-            const isActive = volH1 >= MIN_VOL_H1 && volH6 >= MIN_VOL_H6;
-            const isNew = ageHours <= MAX_AGE_HOURS;
-            const hasEnoughHolders = estimatedHolders >= MIN_HOLDERS;
+            const isMoving = volH1 >= MIN_VOL_H1;
+            const isPumping = priceChange > 0; // Must be green
             const passesSocials = REQUIRE_SOCIALS ? hasSocials : true;
-            const isMovingUp = priceChange > 5; // At least 5% up in 1h
 
-            // Anti-rug: Check liquidity lock indicators
-            const isLiquidityHealthy = liq > (mcap * 0.05); // At least 5% of mcap
-
-            if (isInGemZone && isSafe && isActive && isNew && 
-                hasEnoughHolders && passesSocials && isMovingUp && isLiquidityHealthy) {
-                
-                console.log(`🎯 ELITE CALL: ${pair.baseToken.name} | MCap: $${mcap.toLocaleString()}`);
-                
-                // Enhanced validation with Twitter sentiment
-                const sentiment = await checkTwitterSentiment(pair.baseToken.symbol);
-                const graduated = await checkPumpFunStatus(pair.baseToken.address);
-                
-                await sendEliteAlert(pair, process.env.CHANNEL_ID, {
-                    twitter,
-                    telegram,
-                    website,
-                    sentiment,
-                    graduated,
-                    ageHours
-                });
-
-                // Store call data for gain tracking
-                activeCalls.set(pair.baseToken.address, {
-                    name: pair.baseToken.name,
-                    symbol: pair.baseToken.symbol,
-                    calledAt: now,
-                    initialPrice: priceUsd,
-                    initialMcap: mcap,
-                    pairAddress: pair.pairAddress,
-                    highestGain: 0
-                });
+            if (isGemZone && isSafe && isMoving && isPumping && passesSocials) {
+                console.log(`🎯 FOUND GEM: ${pair.baseToken.name}`);
+                await sendAlert(pair, process.env.CHANNEL_ID);
             }
         }
     } catch (err) {
-        console.error("⚠️ Scan Error:", err.message);
+        console.error("Scanner Error:", err.message);
     }
 }
 
-// --- 4. PUMP.FUN GRADUATION CHECKER ---
-async function checkPumpFunStatus(tokenAddress) {
-    try {
-        // Check if token has graduated from Pump.fun to Raydium
-        const response = await axios.get(
-            `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
-            { timeout: 5000 }
-        );
-
-        if (!response.data?.pairs) return { graduated: false, platform: 'Unknown' };
-
-        const raydiumPair = response.data.pairs.find(p => 
-            p.dexId === 'raydium' || p.labels?.includes('v3')
-        );
-
-        if (raydiumPair) {
-            return { 
-                graduated: true, 
-                platform: 'Raydium',
-                dexId: raydiumPair.dexId 
-            };
-        }
-
-        return { graduated: false, platform: 'Pump.fun/Ongoing' };
-    } catch {
-        return { graduated: false, platform: 'Unknown' };
-    }
-}
-
-// --- 5. TWITTER SENTIMENT ANALYSIS ---
-async function checkTwitterSentiment(symbol) {
-    try {
-        // Use Google search to find recent Twitter mentions
-        const searchUrl = `https://www.googleapis.com/customsearch/v1?key=${process.env.GOOGLE_API_KEY}&cx=${process.env.SEARCH_ENGINE_ID}&q=${symbol}+crypto+twitter&num=5`;
-        
-        if (!process.env.GOOGLE_API_KEY) {
-            return { hype: 'Unknown', mentions: 0 };
-        }
-
-        const { data } = await axios.get(searchUrl, { timeout: 5000 });
-        const mentions = data.searchInformation?.totalResults || 0;
-        
-        const hypeLevel = mentions > 10000 ? '🔥 TRENDING' : 
-                         mentions > 1000 ? '📈 Growing' : 
-                         '🌱 Early';
-
-        return { hype: hypeLevel, mentions: parseInt(mentions) };
-    } catch {
-        return { hype: 'Unknown', mentions: 0 };
-    }
-}
-
-// --- 6. ELITE ALERT SENDER ---
-async function sendEliteAlert(pair, channelId, extras) {
+// --- 4. ALERT SENDER ---
+async function sendAlert(pair, channelId) {
     const channel = client.channels.cache.get(channelId);
     if (!channel) return;
 
     const mcap = pair.fdv || pair.marketCap;
     const price = parseFloat(pair.priceUsd);
-    const liq = pair.liquidity?.usd || 0;
-    const volH1 = pair.volume?.h1 || 0;
-    const priceChange1h = pair.priceChange?.h1 || 0;
-    const priceChange6h = pair.priceChange?.h6 || 0;
     
-    // Social links
-    let socialText = "📱 **Socials:** ";
-    if (extras.twitter) socialText += `[Twitter](${extras.twitter}) `;
-    if (extras.telegram) socialText += `[Telegram](${extras.telegram}) `;
-    if (extras.website) socialText += `[Website](${extras.website})`;
-    if (!extras.twitter && !extras.telegram && !extras.website) {
-        socialText = "⚠️ **No Socials** - Higher Risk";
-    }
-
-    // Graduation status
-    const gradStatus = extras.graduated.graduated 
-        ? `✅ **Graduated to ${extras.graduated.platform}**` 
-        : `⏳ **On ${extras.graduated.platform}** - Not Yet Graduated`;
-
-    // Age badge
-    const ageBadge = extras.ageHours < 24 ? '🆕 FRESH (<24h)' : 
-                     extras.ageHours < 48 ? '⚡ NEW (<48h)' : 
-                     '📅 Recent (<72h)';
+    // Format Social Links
+    const socials = pair.info?.socials || [];
+    const twitter = socials.find(s => s.type === 'twitter')?.url;
+    const telegram = socials.find(s => s.type === 'telegram')?.url;
+    
+    let socialText = "";
+    if (twitter) socialText += `[🐦 Twitter](${twitter}) `;
+    if (telegram) socialText += `[✈️ Telegram](${telegram})`;
+    if (!socialText) socialText = "⚠️ No Socials (Risky)";
 
     const embed = new EmbedBuilder()
-        .setColor('#00FF41')
-        .setTitle(`🎯 GREEN CHIP CALL: ${pair.baseToken.name} ($${pair.baseToken.symbol})`)
-        .setDescription(`
-**${ageBadge}**
-${gradStatus}
-${socialText}
-
-**Twitter Sentiment:** ${extras.sentiment.hype} (${extras.sentiment.mentions.toLocaleString()} mentions)
-        `)
+        .setTitle(`🚀 **GREEN CHIP CALL: ${pair.baseToken.name}**`)
+        .setColor('#00FF00') // Neon Green
+        .setDescription(`**High Conviction Play**\n${socialText}`)
         .addFields(
             { name: '💎 Market Cap', value: `$${mcap.toLocaleString()}`, inline: true },
-            { name: '💰 Price', value: `$${price.toFixed(10)}`, inline: true },
-            { name: '🌊 Liquidity', value: `$${liq.toLocaleString()}`, inline: true },
-            { name: '📊 Volume 1h', value: `$${volH1.toLocaleString()}`, inline: true },
-            { name: '📈 1h Change', value: `${priceChange1h > 0 ? '+' : ''}${priceChange1h.toFixed(2)}%`, inline: true },
-            { name: '📈 6h Change', value: `${priceChange6h > 0 ? '+' : ''}${priceChange6h.toFixed(2)}%`, inline: true },
-            { 
-                name: '⚡ FAST BUY (Lower Fees)', 
-                value: `[👉 **Trade on GMGN**](https://gmgn.ai/r/Greenchip?chain=sol&token=${pair.baseToken.address})\n*Use this platform for reduced trading fees*` 
-            },
-            { name: '📝 Contract Address', value: `\`\`\`${pair.baseToken.address}\`\`\`` }
+            { name: '💰 Price', value: `$${price}`, inline: true },
+            { name: '🌊 Liquidity', value: `$${pair.liquidity.usd.toLocaleString()}`, inline: true },
+            { name: '📊 1h Volume', value: `$${(pair.volume?.h1 || 0).toLocaleString()}`, inline: true },
+            { name: '⚡ FAST BUY', value: `[👉 **TRADE ON GMGN (LOWER FEES)**](https://gmgn.ai/r/Greenchip)` },
+            { name: '📝 Contract', value: `\`${pair.baseToken.address}\`` }
         )
-        .setThumbnail(pair.info?.imageUrl || `https://dd.dexscreener.com/ds-data/tokens/solana/${pair.baseToken.address}.png`)
-        .setFooter({ text: 'Green Chip • Elite Sniper • $20k-$55k Zone • Auto Gain Tracking Active' })
+        .setThumbnail(pair.info?.imageUrl || null)
+        .setFooter({ text: 'Green Chip • God Mode • Auto Gain Tracking' })
         .setTimestamp();
 
-    await channel.send({ embeds: [embed] });
+    const msg = await channel.send({ embeds: [embed] });
+
+    // Save to Memory
+    activeCalls.set(pair.pairAddress, {
+        name: pair.baseToken.name,
+        initialPrice: price,
+        msgId: msg.id,
+        channelId: channel.id,
+        highestGain: 0,
+        address: pair.baseToken.address
+    });
 }
 
-// --- 7. AUTOMATIC GAIN TRACKER ---
+// --- 5. GAIN TRACKER & REPLIES ---
 async function trackGains() {
     if (activeCalls.size === 0) return;
 
-    try {
-        for (const [address, callData] of activeCalls.entries()) {
-            if (ruggedCoins.has(address)) continue;
+    for (const [pairAddress, data] of activeCalls) {
+        try {
+            const res = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${pairAddress}`);
+            if (!res.data.pairs || res.data.pairs.length === 0) continue;
 
-            // Fetch current price
-            const { data } = await axios.get(
-                `https://api.dexscreener.com/latest/dex/tokens/${address}`,
-                { timeout: 5000 }
-            );
+            const currentPair = res.data.pairs[0];
+            const currentPrice = parseFloat(currentPair.priceUsd);
+            const currentLiq = currentPair.liquidity?.usd || 0;
 
-            if (!data?.pairs?.[0]) continue;
-
-            const pair = data.pairs[0];
-            const currentPrice = parseFloat(pair.priceUsd || 0);
-            const currentMcap = pair.fdv || pair.marketCap || 0;
-            const liq = pair.liquidity?.usd || 0;
-
-            if (currentPrice === 0) continue;
-
-            // Calculate gain
-            const gainPercent = ((currentPrice - callData.initialPrice) / callData.initialPrice) * 100;
-
-            // Rug detection
-            const isRugged = liq < 500 || currentMcap < (callData.initialMcap * 0.3);
-
-            if (isRugged) {
-                ruggedCoins.add(address);
-                await sendRugAlert(callData, process.env.CHANNEL_ID);
+            // RUG CHECK
+            if (currentLiq < 500) {
+                activeCalls.delete(pairAddress);
+                ruggedCoins.add(pairAddress);
                 continue;
             }
 
-            // Only send update if gain >= 45% AND is higher than previous highest
-            if (gainPercent >= 45 && gainPercent > callData.highestGain) {
-                callData.highestGain = gainPercent;
-                await sendGainUpdate(callData, gainPercent, currentPrice, currentMcap, process.env.CHANNEL_ID);
-            }
+            // GAIN CALCULATION
+            const gainPct = ((currentPrice - data.initialPrice) / data.initialPrice) * 100;
 
-            // Stop tracking if gain exceeds 10,000,000% (ultra rare but possible)
-            if (gainPercent >= 10000000) {
-                await sendMegaGainAlert(callData, gainPercent, process.env.CHANNEL_ID);
-                ruggedCoins.add(address); // Stop tracking this winner
+            // CHECK TRIGGERS (45%, 100%, 200%, etc)
+            if (gainPct >= MIN_GAIN_REPLY && gainPct > data.highestGain) {
+                // Only alert if gain increased by at least 20% since last alert
+                if (gainPct > (data.highestGain + 20)) {
+                    data.highestGain = gainPct;
+                    await sendReply(data, gainPct, currentPrice);
+                }
             }
-        }
-    } catch (err) {
-        console.error("⚠️ Gain Tracker Error:", err.message);
+        } catch (e) { console.error(e.message); }
     }
 }
 
-// --- 8. GAIN UPDATE MESSAGE ---
-async function sendGainUpdate(callData, gainPercent, currentPrice, currentMcap, channelId) {
-    const channel = client.channels.cache.get(channelId);
+// --- 6. REPLY FUNCTION ---
+async function sendReply(data, gainPct, currentPrice) {
+    const channel = client.channels.cache.get(data.channelId);
     if (!channel) return;
 
-    const gainColor = gainPercent >= 1000 ? '#FFD700' : // Gold for 10x+
-                      gainPercent >= 500 ? '#FF6B00' :  // Orange for 5x+
-                      gainPercent >= 200 ? '#00FF41' :  // Green for 2x+
-                      '#00BFFF';                         // Blue for <2x
-
-    const embed = new EmbedBuilder()
-        .setColor(gainColor)
-        .setTitle(`📈 GAIN UPDATE: ${callData.name}`)
-        .setDescription(`**Our call is up +${gainPercent.toFixed(2)}%!**`)
-        .addFields(
-            { name: '💵 Called At', value: `$${callData.initialPrice.toFixed(10)}`, inline: true },
-            { name: '💰 Current Price', value: `$${currentPrice.toFixed(10)}`, inline: true },
-            { name: '📊 Current MCap', value: `$${currentMcap.toLocaleString()}`, inline: true },
-            { name: '🚀 Gain', value: `**+${gainPercent.toFixed(2)}%**`, inline: false }
-        )
-        .setFooter({ text: 'Green Chip Gain Tracker • Live Updates' })
-        .setTimestamp();
-
-    await channel.send({ embeds: [embed] });
+    try {
+        const originalMsg = await channel.messages.fetch(data.msgId);
+        if (originalMsg) {
+            // Color Logic: Gold for 100%+, Green for 45%+
+            const color = gainPct >= 100 ? '#FFD700' : '#00FF00';
+            
+            const gainEmbed = new EmbedBuilder()
+                .setTitle(`📈 **GAIN UPDATE: +${gainPct.toFixed(2)}%**`)
+                .setColor(color)
+                .setDescription(`**${data.name}** is pumping!\nCurrent Price: $${currentPrice}\n\n[👉 **Sell/Buy on GMGN**](https://gmgn.ai/r/Greenchip)`);
+            
+            await originalMsg.reply({ embeds: [gainEmbed] });
+        }
+    } catch (err) {
+        console.log("Could not find original message.");
+    }
 }
 
-// --- 9. RUG ALERT ---
-async function sendRugAlert(callData, channelId) {
-    const channel = client.channels.cache.get(channelId);
-    if (!channel) return;
-
-    const embed = new EmbedBuilder()
-        .setColor('#FF0000')
-        .setTitle(`🚨 RUG DETECTED: ${callData.name}`)
-        .setDescription(`**This coin appears to have been rugged. Gain tracking stopped.**`)
-        .addFields(
-            { name: '⚠️ Status', value: 'Liquidity Removed or Severe Dump', inline: false },
-            { name: '📉 Action', value: 'Exit immediately if you haven\'t already', inline: false }
-        )
-        .setFooter({ text: 'Green Chip Protection System' })
-        .setTimestamp();
-
-    await channel.send({ embeds: [embed] });
+// --- 7. FORCE SCAN (Debug Tool) ---
+async function forceScan(channelId) {
+    try {
+        const { data } = await axios.get('https://api.dexscreener.com/latest/dex/search?q=solana');
+        const top3 = data.pairs.slice(0, 3);
+        const channel = client.channels.cache.get(channelId);
+        
+        for (const pair of top3) {
+            await channel.send(`**LIVE MARKET CHECK:** ${pair.baseToken.name} | $${pair.priceUsd}`);
+        }
+    } catch (e) { console.error(e); }
 }
 
-// --- 10. MEGA GAIN ALERT (For 100x+ gains) ---
-async function sendMegaGainAlert(callData, gainPercent, channelId) {
-    const channel = client.channels.cache.get(channelId);
-    if (!channel) return;
-
-    const embed = new EmbedBuilder()
-        .setColor('#FFD700')
-        .setTitle(`🏆 LEGENDARY GAIN: ${callData.name}`)
-        .setDescription(`**UNBELIEVABLE! This call hit +${gainPercent.toLocaleString()}%!**`)
-        .addFields(
-            { name: '👑 Achievement', value: 'MEGA WINNER - Tracking Complete', inline: false },
-            { name: '💎 Initial Call', value: `$${callData.initialPrice.toFixed(10)}`, inline: true },
-            { name: '🚀 Peak Gain', value: `**+${gainPercent.toLocaleString()}%**`, inline: true }
-        )
-        .setFooter({ text: 'Green Chip • Ultimate Sniper Success' })
-        .setTimestamp();
-
-    await channel.send({ embeds: [embed] });
-}
-
-// --- UTILITY FUNCTIONS ---
-function formatUptime(seconds) {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    
-    return `${days}d ${hours}h ${minutes}m`;
-}
-
-// --- ERROR HANDLING ---
-process.on('unhandledRejection', (error) => {
-    console.error('❌ Unhandled promise rejection:', error);
-});
-
-client.on('error', (error) => {
-    console.error('❌ Discord client error:', error);
-});
-
-// --- START BOT ---
 client.login(process.env.DISCORD_TOKEN);
