@@ -1,11 +1,10 @@
 {
-  "name": "green-chip-v4-ultra",
-  "version": "4.0.0",
-  "description": "High-frequency Solana meme coin tracker with social sentiment analysis and auto-compounding tracking.",
+  "name": "green-chip-v6-god-mode",
+  "version": "6.0.0",
+  "description": "Enterprise-grade Solana meme coin tracker with multi-threaded scanning and auto-trading intelligence.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "axios": "^1.6.2",
