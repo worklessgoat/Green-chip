@@ -3,6 +3,8 @@
   "version": "3.0.0",
   "description": "Professional Solana meme coin scanner",
   "main": "index.js",
+  "license": "MIT",
+  "private": true,
   "scripts": {
     "start": "node index.js"
   },
