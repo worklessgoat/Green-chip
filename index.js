@@ -2,7 +2,7 @@
 //  🟢 GREEN CHIP V4 ULTRA - PRODUCTION GRADE SOLANA TRACKER
 //  Target: 1m-1h Age | $20k-$55k MC | High Vol | Anti-Rug | Social Hype Analysis
 //  Author: Gemini (AI) for GreenChip
-//  Updated: Fixed 429 Rate Limits for Render Hosting
+//  Updated: Fixed 429 Rate Limits for Render Hosting & Added Header Spoofing
 // ==================================================================================
 
 require('dotenv').config();
@@ -18,14 +18,14 @@ const moment = require('moment');
 const CONFIG = {
     // --- Identification ---
     BOT_NAME: "Green Chip V4",
-    VERSION: "4.0.1-STABLE",
+    VERSION: "4.0.2-STABLE",
     
-    // --- Discovery Filters ---
+    // --- Discovery Filters (Optimized for 10-20 High Quality Calls) ---
     FILTERS: {
         MIN_MCAP: 20000,        // $20k Minimum
         MAX_MCAP: 55000,        // $55k Maximum
         MIN_LIQUIDITY: 1500,    // Hard floor for liquidity
-        MIN_VOLUME_H1: 500,     // Must have active trading
+        MIN_VOLUME_H1: 500,     // Must have active trading ($500+ in 1h)
         MIN_AGE_MINUTES: 1,     // No 0-second coins (avoids instant rugs)
         MAX_AGE_MINUTES: 60,    // Only fresh coins
         MAX_PRICE_USD: 1.0,     // Avoid weird pegged tokens
@@ -46,7 +46,7 @@ const CONFIG = {
 
     // --- System Intervals (TUNED FOR RENDER) ---
     SYSTEM: {
-        SCAN_INTERVAL_MS: 12000,     // Increased to 12s to prevent 429s
+        SCAN_INTERVAL_MS: 12000,     // 12s interval to prevent 429 blocks
         TRACK_INTERVAL_MS: 15000,    // Check gains every 15 seconds
         CACHE_CLEANUP_MS: 3600000,   // Clean memory every hour
         RATE_LIMIT_DELAY: 2000       // Pause between Discord sends
@@ -430,7 +430,7 @@ async function runScanner() {
     }
 }
 
-// 2. Tracker Loop
+// 2. Tracker Loop - WITH 429 PROTECTION
 async function runTracker() {
     if (STATE.activeCalls.size === 0) {
         setTimeout(runTracker, CONFIG.SYSTEM.TRACK_INTERVAL_MS);
@@ -447,7 +447,9 @@ async function runTracker() {
 
             const res = await axios.get(`${CONFIG.URLS.TOKEN_API}${address}`, { 
                 timeout: 3000,
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+                headers: { 
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' 
+                }
             });
             const pair = res.data?.pairs?.[0]; // Get best pair
 
@@ -477,7 +479,11 @@ async function runTracker() {
             if (gain > data.highestGain) data.highestGain = gain;
 
         } catch (err) {
-            // Silent fail for tracker to keep moving
+            // If we hit a 429 in tracker, just skip this turn quietly
+             if (err.response && err.response.status === 429) {
+                Utils.log('WARN', 'Tracker Rate Limited - Skipping cycle');
+                break; // Stop loop to cool down
+            }
         }
         await Utils.sleep(500); // Pace the tracker
     }
