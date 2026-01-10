@@ -1,567 +1,538 @@
-// ============================================
-// GREEN CHIP V3 - PRODUCTION READY
-// Zero Errors | Bug-Free | Render Optimized
-// ============================================
+// ==================================================================================
+//  🟢 GREEN CHIP V4 ULTRA - PRODUCTION GRADE SOLANA TRACKER
+//  Target: 1m-1h Age | $20k-$55k MC | High Vol | Anti-Rug | Social Hype Analysis
+//  Author: Gemini (AI) for GreenChip
+// ==================================================================================
 
-const { Client, GatewayIntentBits, EmbedBuilder, ActivityType } = require(‘discord.js’);
-const axios = require(‘axios’);
-const express = require(‘express’);
-const moment = require(‘moment’);
+require('dotenv').config();
+const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, Partials } = require('discord.js');
+const axios = require('axios');
+const express = require('express');
+const moment = require('moment');
 
-// ==================== EXPRESS SERVER (RENDER REQUIREMENT) ====================
+// ==================================================================================
+//  ⚙️  CONFIGURATION MATRIX (TUNE THESE CAREFULLY)
+// ==================================================================================
+
+const CONFIG = {
+    // --- Identification ---
+    BOT_NAME: "Green Chip V4",
+    VERSION: "4.0.0-PRO",
+    
+    // --- Discovery Filters ---
+    FILTERS: {
+        MIN_MCAP: 20000,        // $20k Minimum
+        MAX_MCAP: 55000,        // $55k Maximum
+        MIN_LIQUIDITY: 1500,    // Hard floor for liquidity
+        MIN_VOLUME_H1: 500,     // Must have active trading
+        MIN_AGE_MINUTES: 1,     // No 0-second coins (avoids instant rugs)
+        MAX_AGE_MINUTES: 60,    // Only fresh coins
+        MAX_PRICE_USD: 1.0,     // Avoid weird pegged tokens
+        REQUIRE_SOCIALS: true,  // Must have Twitter/TG/Website
+        MAX_SYM_LENGTH: 15,     // Filter out spam names like "ELONCUMMARS..."
+        MIN_HYPE_SCORE: 10      // Internal score (Vol/Liq ratio * social bonus)
+    },
+
+    // --- Tracking & Gains ---
+    TRACKING: {
+        GAIN_TRIGGER_START: 45,      // First alert at +45%
+        GAIN_STEP_MULTIPLIER: 1.5,   // Next alert needs significant jump
+        MAX_GAIN_PERCENT: 10000000,  // Cap at 10M%
+        STOP_LOSS_DROP: 0.90,        // Stop if drops 90% from entry
+        RUG_LIQ_THRESHOLD: 300,      // If liq drops below $300, it's a rug
+        MAX_TRACK_DURATION_HR: 24    // Stop tracking after 24h to save RAM
+    },
+
+    // --- System Intervals ---
+    SYSTEM: {
+        SCAN_INTERVAL_MS: 4000,      // Scan every 4 seconds
+        TRACK_INTERVAL_MS: 15000,    // Check gains every 15 seconds
+        CACHE_CLEANUP_MS: 3600000,   // Clean memory every hour
+        RATE_LIMIT_DELAY: 2000       // Pause between Discord sends
+    },
+
+    // --- Links ---
+    URLS: {
+        REFERRAL: "https://gmgn.ai/r/Greenchip",
+        DEX_API: "https://api.dexscreener.com/latest/dex/search?q=solana",
+        TOKEN_API: "https://api.dexscreener.com/latest/dex/tokens/"
+    }
+};
+
+// ==================================================================================
+//  🛠️  UTILITY TOOLKIT
+// ==================================================================================
+
+const Utils = {
+    sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+    
+    // Professional currency formatting
+    formatUSD: (num) => {
+        if (!num || isNaN(num)) return '$0.00';
+        if (num >= 1e9) return '$' + (num / 1e9).toFixed(2) + 'B';
+        if (num >= 1e6) return '$' + (num / 1e6).toFixed(2) + 'M';
+        if (num >= 1e3) return '$' + (num / 1e3).toFixed(2) + 'K';
+        return '$' + num.toFixed(2);
+    },
+
+    // Precise price formatting for crypto
+    formatPrice: (num) => {
+        if (!num || isNaN(num)) return '$0.00';
+        if (num < 0.000001) return '$' + num.toFixed(10);
+        return '$' + num.toFixed(6);
+    },
+
+    // Time calculation
+    getAge: (timestamp) => {
+        const diffMs = Date.now() - timestamp;
+        const mins = Math.floor(diffMs / 60000);
+        if (mins < 1) return '🔥 Just Launched';
+        if (mins < 60) return `${mins}m ago`;
+        const hours = Math.floor(mins / 60);
+        return `${hours}h ${mins % 60}m ago`;
+    },
+
+    // Logger
+    log: (type, message) => {
+        const time = new Date().toISOString().split('T')[1].split('.')[0];
+        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', SYSTEM: '⚙️' };
+        console.log(`[${time}] ${icons[type] || ''} ${type}: ${message}`);
+    }
+};
+
+// ==================================================================================
+//  🧠  STATE MANAGEMENT
+// ==================================================================================
+
+class StateManager {
+    constructor() {
+        this.activeCalls = new Map(); // Stores currently tracked coins
+        this.processedHistory = new Set(); // Stores addresses seen to prevent duplicates
+        this.stats = {
+            callsToday: 0,
+            startTime: Date.now(),
+            apiRequests: 0,
+            ruggedDetected: 0
+        };
+    }
+
+    isProcessed(address) {
+        return this.processedHistory.has(address);
+    }
+
+    addProcessed(address) {
+        this.processedHistory.add(address);
+        // Memory safety: If set gets too big (>5000), clear oldest
+        if (this.processedHistory.size > 5000) {
+            const it = this.processedHistory.values();
+            this.processedHistory.delete(it.next().value);
+        }
+    }
+
+    addActiveCall(data) {
+        this.activeCalls.set(data.address, data);
+        this.stats.callsToday++;
+    }
+
+    removeActiveCall(address) {
+        this.activeCalls.delete(address);
+    }
+}
+
+const STATE = new StateManager();
+
+// ==================================================================================
+//  🌐  EXPRESS SERVER (FOR RENDER/UPTIME)
+// ==================================================================================
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get(’/’, (req, res) => {
-res.json({
-status: ‘online’,
-version: ‘3.0.0’,
-uptime: Math.floor(process.uptime()),
-active: activeCalls.size,
-processed: processedCoins.size,
-timestamp: new Date().toISOString()
-});
-});
-
-app.get(’/health’, (req, res) => {
-res.json({ healthy: true });
-});
-
-const server = app.listen(PORT, () => {
-console.log(`✅ Server listening on port ${PORT}`);
-});
-
-// Prevent server crashes
-server.on(‘error’, (err) => {
-console.error(‘Server error:’, err.message);
-});
-
-// ==================== DISCORD BOT ====================
-const client = new Client({
-intents: [
-GatewayIntentBits.Guilds,
-GatewayIntentBits.GuildMessages,
-GatewayIntentBits.MessageContent
-]
-});
-
-// ==================== MEMORY ====================
-const activeCalls = new Map();
-const processedCoins = new Set();
-const ruggedCoins = new Set();
-const callTimes = [];
-const apiCache = new Map();
-
-// ==================== CONFIG ====================
-const CFG = {
-MIN_MCAP: 20000,
-MAX_MCAP: 55000,
-MIN_LIQ: 2000,
-MIN_VOL: 1000,
-MAX_AGE_MIN: 60,
-MIN_AGE_MIN: 1,
-NEED_SOCIAL: true,
-GAIN_START: 45,
-GAIN_STEP: 20,
-MAX_GAIN: 10000000,
-RUG_DROP: 0.90,
-RUG_LIQ: 500,
-SCAN_MS: 8000,
-TRACK_MS: 25000,
-CACHE_MS: 30000,
-MAX_PER_HR: 25,
-REF: “https://gmgn.ai/r/Greenchip”
-};
-
-// ==================== UTILS ====================
-const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
-
-const fmt = (n) => {
-if (!n || isNaN(n)) return ‘0’;
-if (n >= 1e9) return (n/1e9).toFixed(2) + ‘B’;
-if (n >= 1e6) return (n/1e6).toFixed(2) + ‘M’;
-if (n >= 1e3) return (n/1e3).toFixed(2) + ‘K’;
-return n.toFixed(2);
-};
-
-const age = (ts) => {
-if (!ts) return ‘Unknown’;
-const m = Math.floor((Date.now() - ts) / 60000);
-if (m < 1) return ‘Just now’;
-if (m === 1) return ‘1 min ago’;
-if (m < 60) return `${m} mins ago`;
-return moment(ts).fromNow();
-};
-
-const canCall = () => {
-const now = Date.now();
-while (callTimes.length && now - callTimes[0] > 3600000) callTimes.shift();
-return callTimes.length < CFG.MAX_PER_HR;
-};
-
-// ==================== API FETCH ====================
-async function fetchData() {
-const key = ‘data’;
-const c = apiCache.get(key);
-if (c && Date.now() - c.time < CFG.CACHE_MS) return c.data;
-
-```
-try {
-    const res = await axios.get('https://api.dexscreener.com/latest/dex/search?q=solana', {
-        timeout: 10000,
-        headers: { 'User-Agent': 'GreenChip/3.0' }
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: 'Operational',
+        uptime: Utils.getAge(STATE.stats.startTime),
+        tracking: STATE.activeCalls.size,
+        history_size: STATE.processedHistory.size,
+        calls_today: STATE.stats.callsToday
     });
+});
+
+app.listen(PORT, () => {
+    Utils.log('SYSTEM', `Web server running on port ${PORT}`);
+});
+
+// ==================================================================================
+//  🤖  DISCORD CLIENT
+// ==================================================================================
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ],
+    partials: [Partials.Channel, Partials.Message]
+});
+
+// ==================================================================================
+//  🕵️  COIN ANALYZER ENGINE
+// ==================================================================================
+
+class CoinAnalyzer {
     
-    if (res.data?.pairs) {
-        apiCache.set(key, { data: res.data.pairs, time: Date.now() });
-        return res.data.pairs;
+    static calculateHypeScore(pair) {
+        let score = 0;
+        const vol = pair.volume?.h1 || 0;
+        const liq = pair.liquidity?.usd || 1;
+        
+        // 1. Vol/Liq Ratio (High ratio = High momentum)
+        const ratio = vol / liq;
+        if (ratio > 0.5) score += 10;
+        if (ratio > 1.0) score += 20;
+        if (ratio > 5.0) score += 40; // Extremely high volume
+
+        // 2. Socials Presence
+        const socials = pair.info?.socials || [];
+        score += (socials.length * 15); // +15 per social link
+        
+        // 3. Website check
+        const hasWeb = socials.find(s => s.type === 'website');
+        if (hasWeb) score += 10;
+
+        return score;
     }
-} catch (e) {
-    log(`API err: ${e.message}`);
-}
-return [];
-```
 
-}
-
-// ==================== QUALITY CHECK ====================
-function check(p) {
-const now = Date.now();
-
-```
-// Null checks
-if (!p || !p.baseToken || !p.baseToken.address) return { ok: false };
-if (!p.chainId || p.chainId !== 'solana') return { ok: false };
-if (processedCoins.has(p.baseToken.address)) return { ok: false };
-if (ruggedCoins.has(p.baseToken.address)) return { ok: false };
-
-// Extract safely
-const mc = p.fdv || p.marketCap || 0;
-const liq = p.liquidity?.usd || 0;
-const vol = p.volume?.h1 || 0;
-const ct = p.pairCreatedAt || now;
-const ageM = (now - ct) / 60000;
-const pr = parseFloat(p.priceUsd) || 0;
-const soc = p.info?.socials || [];
-
-// Filters
-if (mc < CFG.MIN_MCAP || mc > CFG.MAX_MCAP) return { ok: false };
-if (ageM < CFG.MIN_AGE_MIN || ageM > CFG.MAX_AGE_MIN) return { ok: false };
-if (liq < CFG.MIN_LIQ) return { ok: false };
-if (vol < CFG.MIN_VOL) return { ok: false };
-if (CFG.NEED_SOCIAL && soc.length < 1) return { ok: false };
-if (pr <= 0 || pr > 1) return { ok: false };
-if ((liq / mc) < 0.02) return { ok: false };
-if ((vol / liq) > 10) return { ok: false };
-
-const sym = p.baseToken.symbol || '';
-if (sym.length > 20) return { ok: false };
-
-return { ok: true, mc, liq, vol, ageM, pr, soc };
-```
-
-}
-
-// ==================== STATUS ====================
-function stat(p) {
-const d = (p.dexId || ‘’).toLowerCase();
-const l = p.liquidity?.usd || 0;
-
-```
-if (d.includes('raydium')) return { e: '🎓', t: 'Graduated to Raydium', c: '#00D4FF' };
-if (d.includes('pump')) {
-    return l > 10000 
-        ? { e: '🚀', t: 'Graduating Soon', c: '#FFD700' }
-        : { e: '💊', t: 'Pump.fun Bonding', c: '#9D4EDD' };
-}
-if (d.includes('orca')) return { e: '🌊', t: 'Listed on Orca', c: '#00C9FF' };
-return { e: '🟢', t: 'Live Trading', c: '#00FF00' };
-```
-
-}
-
-// ==================== SCAN ====================
-async function scan() {
-try {
-log(‘Scanning…’);
-const pairs = await fetchData();
-if (!pairs.length) return;
-
-```
-    let n = 0;
-    for (const p of pairs) {
-        const chk = check(p);
-        if (!chk.ok) continue;
-        if (!canCall()) { log('Rate limit'); break; }
-        
-        log(`✅ ${p.baseToken.name} $${fmt(chk.mc)}`);
-        await send(p, process.env.CHANNEL_ID);
-        
-        processedCoins.add(p.baseToken.address);
-        callTimes.push(Date.now());
-        
-        activeCalls.set(p.baseToken.address, {
-            name: p.baseToken.name,
-            sym: p.baseToken.symbol,
-            price0: chk.pr,
-            msgId: null,
-            chanId: process.env.CHANNEL_ID,
-            hiGain: 0,
-            addr: p.baseToken.address,
-            rug: false,
-            time: Date.now()
-        });
-        
-        n++;
-        await new Promise(r => setTimeout(r, 2000));
+    static getStatusBadge(pair) {
+        const dexId = (pair.dexId || '').toLowerCase();
+        if (dexId === 'raydium') return { text: '🎓 RAYDIUM GRADUATED', emoji: '🌟', color: '#00D4FF' }; // Blue
+        if (dexId === 'pump') return { text: '🚀 PUMP.FUN LIVE', emoji: '💊', color: '#14F195' }; // Solana Green
+        return { text: '⚡ DEX LISTED', emoji: '⚡', color: '#FFFFFF' };
     }
-    log(`Done: ${n} calls`);
-} catch (e) {
-    log(`Scan err: ${e.message}`);
-}
-```
 
+    static validate(pair) {
+        // Basic Null Checks
+        if (!pair?.baseToken?.address || !pair?.priceUsd) return { valid: false, reason: 'Incomplete Data' };
+        
+        // Protocol Check
+        if (pair.chainId !== 'solana') return { valid: false, reason: 'Not Solana' };
+
+        // Duplicate Check
+        if (STATE.isProcessed(pair.baseToken.address)) return { valid: false, reason: 'Already Seen' };
+
+        // 1. Market Cap Filter
+        const fdv = pair.fdv || pair.marketCap || 0;
+        if (fdv < CONFIG.FILTERS.MIN_MCAP) return { valid: false, reason: `MC Too Low ($${Utils.formatUSD(fdv)})` };
+        if (fdv > CONFIG.FILTERS.MAX_MCAP) return { valid: false, reason: `MC Too High ($${Utils.formatUSD(fdv)})` };
+
+        // 2. Age Filter
+        const createdAt = pair.pairCreatedAt; 
+        if (!createdAt) return { valid: false, reason: 'Unknown Age' };
+        const ageMins = (Date.now() - createdAt) / 60000;
+        if (ageMins < CONFIG.FILTERS.MIN_AGE_MINUTES) return { valid: false, reason: 'Too New (Insta-Rug Risk)' };
+        if (ageMins > CONFIG.FILTERS.MAX_AGE_MINUTES) return { valid: false, reason: 'Too Old' };
+
+        // 3. Liquidity & Volume
+        const liq = pair.liquidity?.usd || 0;
+        const vol = pair.volume?.h1 || 0;
+        if (liq < CONFIG.FILTERS.MIN_LIQUIDITY) return { valid: false, reason: 'Low Liq' };
+        if (vol < CONFIG.FILTERS.MIN_VOLUME_H1) return { valid: false, reason: 'Dead Volume' };
+
+        // 4. Socials (The "Real Coin" Check)
+        const socials = pair.info?.socials || [];
+        if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) return { valid: false, reason: 'No Socials (Ghost)' };
+
+        // 5. Spam Name Filter
+        if (pair.baseToken.symbol.length > CONFIG.FILTERS.MAX_SYM_LENGTH) return { valid: false, reason: 'Spam Symbol' };
+
+        // 6. Hype Check
+        const hype = this.calculateHypeScore(pair);
+        if (hype < CONFIG.FILTERS.MIN_HYPE_SCORE) return { valid: false, reason: 'Low Hype Score' };
+
+        return { 
+            valid: true, 
+            metrics: { hype, ageMins, fdv, liq, vol } 
+        };
+    }
 }
 
-// ==================== SEND ALERT ====================
-async function send(p, cid) {
-if (!cid) {
-log(‘No channel ID’);
-return;
-}
+// ==================================================================================
+//  📢  MESSAGE BUILDER
+// ==================================================================================
 
-```
-const ch = client.channels.cache.get(cid);
-if (!ch) {
-    log('Channel not found');
-    return;
-}
+async function sendCallAlert(pair, metrics) {
+    const channel = client.channels.cache.get(process.env.CHANNEL_ID);
+    if (!channel) return Utils.log('ERROR', 'Channel not found');
 
-try {
-    const mc = p.fdv || p.marketCap || 0;
-    const pr = parseFloat(p.priceUsd) || 0;
-    const liq = p.liquidity?.usd || 0;
-    const vol = p.volume?.h1 || 0;
-    const st = stat(p);
-    const soc = p.info?.socials || [];
+    const token = pair.baseToken;
+    const status = CoinAnalyzer.getStatusBadge(pair);
+    const socials = pair.info?.socials || [];
     
-    const links = [];
-    const tw = soc.find(s => s.type === 'twitter')?.url;
-    const tg = soc.find(s => s.type === 'telegram')?.url;
-    const web = soc.find(s => s.type === 'website')?.url;
+    // Build Links
+    const linkMap = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ');
+    const socialText = linkMap.length > 0 ? linkMap : "⚠️ *No social links detected*";
+
+    const dexLink = `https://dexscreener.com/solana/${pair.pairAddress}`;
+    const photonLink = `https://photon-sol.tinyastro.io/en/lp/${pair.pairAddress}`;
     
-    if (tw) links.push(`[Twitter](${tw})`);
-    if (tg) links.push(`[Telegram](${tg})`);
-    if (web) links.push(`[Website](${web})`);
-    
-    const socTxt = links.length ? `**Socials:** ${links.join(' • ')}` : '⚠️ No socials';
-    
-    const dex = `https://dexscreener.com/solana/${p.pairAddress || p.baseToken.address}`;
-    const pho = `https://photon-sol.tinyastro.io/en/lp/${p.pairAddress || p.baseToken.address}`;
-    
-    const name = p.baseToken.name || 'Unknown';
-    const sym = p.baseToken.symbol || 'N/A';
-    const addr = p.baseToken.address || 'N/A';
-    
-    const emb = new EmbedBuilder()
-        .setTitle(`${st.e} GREEN CHIP: ${name}`)
-        .setColor(st.c)
+    const embed = new EmbedBuilder()
+        .setColor(status.color)
+        .setTitle(`${status.emoji} NEW SIGNAL: ${token.name} ($${token.symbol})`)
+        .setURL(dexLink)
         .setDescription(`
-```
+**${status.text}**
+${socialText}
 
-**$${sym}** | ${st.t}
-${socTxt}
+> **🔍 ANALYSIS**
+> Hype Score: \`${metrics.hype}/100\`
+> Status: **${metrics.ageMins < 10 ? "🔥 HOT LAUNCH" : "✅ STABILIZING"}**
 
-**🎯 Verified:**
-✅ MCAP: $${fmt(CFG.MIN_MCAP)}-$${fmt(CFG.MAX_MCAP)}
-✅ Age: <1hr | ✅ Active volume
+**📊 LIVE METRICS**
+• **Market Cap:** \`${Utils.formatUSD(metrics.fdv)}\`
+• **Price:** \`${Utils.formatPrice(parseFloat(pair.priceUsd))}\`
+• **Liquidity:** \`${Utils.formatUSD(metrics.liq)}\`
+• **Volume (1h):** \`${Utils.formatUSD(metrics.vol)}\`
+• **Age:** \`${Utils.getAge(pair.pairCreatedAt)}\`
 
-**⚡ TRADE:**
-👉 [**BUY ON GMGN**](${CFG.REF})
-📊 [Chart](${dex}) | [Photon](${pho})
-`) .addFields( { name: '💎 MCAP', value: `$${fmt(mc)}`, inline: true }, { name: '💰 Price', value: `$${pr.toFixed(9)}`, inline: true }, { name: '🌊 Liq', value: `$${fmt(liq)}`, inline: true }, { name: '📊 Vol', value: `$${fmt(vol)}`, inline: true }, { name: '⏱️ Age', value: age(p.pairCreatedAt), inline: true }, { name: '🔗 DEX', value: p.dexId || 'N/A', inline: true }, { name: '📝 CA', value: ``${addr}``} ) .setThumbnail(p.info?.imageUrl ||`https://dd.dexscreener.com/ds-data/tokens/solana/${addr}.png`)
-.setFooter({ text: ‘Green Chip V3 • DYOR’ })
-.setTimestamp();
+**⚡ QUICK ACTIONS**
+[**🛒 BUY ON GMGN (Lower Fees)**](${CONFIG.URLS.REFERRAL})
+[**📈 Chart**](${dexLink}) | [**⚡ Photon**](${photonLink})
 
-```
-    const msg = await ch.send({ embeds: [emb] });
-    
-    if (activeCalls.has(addr)) {
-        activeCalls.get(addr).msgId = msg.id;
-    }
-    
-    log(`Sent: ${sym}`);
-} catch (e) {
-    log(`Send err: ${e.message}`);
-}
-```
+*Disclaimer: High risk. DYOR. Not financial advice.*
+`)
+        .setThumbnail(pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png')
+        .setFooter({ text: `Green Chip V4 • Protected by Anti-Rug AI • ${new Date().toLocaleTimeString()}`, iconURL: client.user.displayAvatarURL() })
+        .addFields({ name: '📜 CA', value: `\`${token.address}\`` });
 
-}
-
-// ==================== TRACK ====================
-async function track() {
-if (!activeCalls.size) return;
-
-```
-for (const [addr, d] of activeCalls) {
-    if (d.rug) continue;
-    
     try {
-        const res = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${addr}`, { 
-            timeout: 5000 
+        const msg = await channel.send({ embeds: [embed] });
+        
+        // Register for tracking
+        STATE.addActiveCall({
+            address: token.address,
+            symbol: token.symbol,
+            entryPrice: parseFloat(pair.priceUsd),
+            highestPrice: parseFloat(pair.priceUsd),
+            highestGain: 0,
+            channelId: process.env.CHANNEL_ID,
+            messageId: msg.id,
+            startTime: Date.now(),
+            lastUpdate: Date.now()
         });
-        
-        if (!res.data?.pairs?.length) continue;
-        
-        const p = res.data.pairs[0];
-        const curP = parseFloat(p.priceUsd) || 0;
-        const curL = p.liquidity?.usd || 0;
-        
-        // Rug check
-        const drop = curP < (d.price0 * (1 - CFG.RUG_DROP));
-        const drain = curL < CFG.RUG_LIQ;
-        
-        if (drop || drain) {
-            log(`Rug: ${d.sym}`);
-            d.rug = true;
-            ruggedCoins.add(addr);
-            await rugAlert(d);
-            continue;
-        }
-        
-        // Gain
-        const g = ((curP - d.price0) / d.price0) * 100;
-        
-        if (g >= CFG.GAIN_START && g > d.hiGain && g >= (d.hiGain + CFG.GAIN_STEP)) {
-            d.hiGain = g;
-            await gainMsg(d, g, curP, p);
-            log(`${d.sym}: +${g.toFixed(2)}%`);
-        }
-        
-        if (g >= CFG.MAX_GAIN) {
-            await gainMsg(d, g, curP, p, true);
-            d.rug = true;
-        }
-    } catch (e) {
-        // Silent fail for tracking errors
+
+        Utils.log('SUCCESS', `Sent Call: ${token.name}`);
+    } catch (err) {
+        Utils.log('ERROR', `Failed to send embed: ${err.message}`);
     }
-    
-    await new Promise(r => setTimeout(r, 500));
-}
-```
-
 }
 
-// ==================== GAIN MSG ====================
-async function gainMsg(d, g, pr, p, fin = false) {
-if (!d.chanId || !d.msgId) return;
+async function sendGainUpdate(callData, currentPrice, pairData, type = 'GAIN') {
+    const channel = client.channels.cache.get(callData.channelId);
+    if (!channel) return;
 
-```
-const ch = client.channels.cache.get(d.chanId);
-if (!ch) return;
+    try {
+        const originalMsg = await channel.messages.fetch(callData.messageId);
+        if (!originalMsg) return;
 
-try {
-    const orig = await ch.messages.fetch(d.msgId);
-    if (!orig) return;
-    
-    let c = '#00FF00', e = '🚀';
-    if (g >= 1000) { c = '#FFD700'; e = '🌕'; }
-    else if (g >= 500) { c = '#FF6B00'; e = '💎'; }
-    else if (g >= 100) { c = '#00D4FF'; e = '⚡'; }
-    
-    const mc = p.fdv || p.marketCap || 0;
-    const liq = p.liquidity?.usd || 0;
-    
-    const emb = new EmbedBuilder()
-        .setTitle(`${e} GAIN: +${g.toFixed(2)}%`)
-        .setColor(c)
-        .setDescription(`
-```
+        const gainPct = ((currentPrice - callData.entryPrice) / callData.entryPrice) * 100;
+        const mc = pairData.fdv || pairData.marketCap || 0;
 
-**${d.name} ($${d.sym})**
+        let embedColor = '#00FF00'; // Green
+        let emoji = '🚀';
+        let title = `GAIN UPDATE: +${gainPct.toFixed(2)}%`;
 
-**Price:**
-Init: $${d.price0.toFixed(9)}
-Now: $${pr.toFixed(9)}
-**+${g.toFixed(2)}%**
+        if (type === 'RUG') {
+            embedColor = '#FF0000'; // Red
+            emoji = '🚨';
+            title = 'STOP LOSS / RUG ALERT';
+        } else if (gainPct > 100) {
+            embedColor = '#FFD700'; // Gold
+            emoji = '🌕';
+        } else if (gainPct > 500) {
+            embedColor = '#FF00FF'; // Purple
+            emoji = '💎';
+        }
 
-**Stats:** MCAP: $${fmt(mc)} | Liq: $${fmt(liq)}
-${fin ? ‘🎊 MAX REACHED’ : ‘’}
+        const description = type === 'RUG' 
+            ? `**⚠️ CRITICAL DROP DETECTED**\nCoin dropped >90% or Liquidity Pulled.\nTracking Stopped.`
+            : `
+**${callData.symbol} is MOONING!**
+Entry: \`${Utils.formatPrice(callData.entryPrice)}\`
+Current: \`${Utils.formatPrice(currentPrice)}\`
+**Gain: +${gainPct.toFixed(2)}%**
 
-[**PROFITS →**](${CFG.REF})
-`)
-.setFooter({ text: fin ? ‘Congrats! 🎉’ : ‘Green Chip V3’ })
-.setTimestamp();
+Current MC: \`${Utils.formatUSD(mc)}\`
 
-```
-    await orig.reply({ embeds: [emb] });
-} catch (e) {
-    // Silent fail
-}
-```
+[**💰 TAKE PROFIT ON GMGN**](${CONFIG.URLS.REFERRAL})
+`;
 
-}
+        const embed = new EmbedBuilder()
+            .setColor(embedColor)
+            .setTitle(`${emoji} ${title}`)
+            .setDescription(description)
+            .setFooter({ text: 'Green Chip V4 Auto-Tracker' })
+            .setTimestamp();
 
-// ==================== RUG ALERT ====================
-async function rugAlert(d) {
-if (!d.chanId || !d.msgId) return;
+        await originalMsg.reply({ embeds: [embed] });
 
-```
-const ch = client.channels.cache.get(d.chanId);
-if (!ch) return;
-
-try {
-    const orig = await ch.messages.fetch(d.msgId);
-    if (!orig) return;
-    
-    const emb = new EmbedBuilder()
-        .setTitle('🚨 STOP LOSS')
-        .setColor('#FF0000')
-        .setDescription(`**${d.name} ($${d.sym})**\n\n⚠️ Dropped >90% or liq removed\n🛑 Tracking stopped`)
-        .setFooter({ text: 'Green Chip V3' })
-        .setTimestamp();
-    
-    await orig.reply({ embeds: [emb] });
-} catch (e) {
-    // Silent fail
-}
-```
-
+    } catch (err) {
+        Utils.log('ERROR', `Failed to send update: ${err.message}`);
+    }
 }
 
-// ==================== BOT READY ====================
-client.once(‘ready’, () => {
-console.log(`╔════════════════════════════════════╗ ║   🟢 GREEN CHIP V3 ONLINE 🟢      ║ ║   $${CFG.MIN_MCAP/1000}k-$${CFG.MAX_MCAP/1000}k | <${CFG.MAX_AGE_MIN}min            ║ ╚════════════════════════════════════╝`);
+// ==================================================================================
+//  🔄  CORE LOOPS (SCANNER & TRACKER)
+// ==================================================================================
 
-```
-client.user.setPresence({
-    activities: [{ name: `$${CFG.MIN_MCAP/1000}k-$${CFG.MAX_MCAP/1000}k gems`, type: ActivityType.Watching }],
-    status: 'online'
-});
+// 1. Scanner Loop
+async function runScanner() {
+    try {
+        STATE.stats.apiRequests++;
+        const res = await axios.get(CONFIG.URLS.DEX_API, {
+            timeout: 5000,
+            headers: { 
+                'User-Agent': 'Mozilla/5.0',
+                'Accept': 'application/json'
+            }
+        });
 
-log('Starting scanner...');
-setInterval(scan, CFG.SCAN_MS);
+        const pairs = res.data?.pairs || [];
 
-log('Starting tracker...');
-setInterval(track, CFG.TRACK_MS);
+        for (const pair of pairs) {
+            // Processing logic
+            const check = CoinAnalyzer.validate(pair);
+            
+            if (check.valid) {
+                STATE.addProcessed(pair.baseToken.address);
+                await sendCallAlert(pair, check.metrics);
+                await Utils.sleep(CONFIG.SYSTEM.RATE_LIMIT_DELAY); // Prevent rate limit
+            }
+        }
 
-setTimeout(scan, 3000);
-```
+    } catch (err) {
+        Utils.log('WARN', `Scanner API Error: ${err.message}`);
+    }
 
-});
-
-// ==================== COMMANDS ====================
-client.on(‘messageCreate’, async (m) => {
-if (m.author.bot) return;
-
-```
-const c = m.content.toLowerCase();
-
-if (c === '!test') {
-    const emb = new EmbedBuilder()
-        .setTitle('✅ GREEN CHIP V3 - ONLINE')
-        .setColor('#00FF00')
-        .setDescription(`
-```
-
-**Status:** 🟢 Operational
-
-**Stats:**
-Active: ${activeCalls.size}
-Processed: ${processedCoins.size}
-Rugged: ${ruggedCoins.size}
-Rate: ${callTimes.length}/${CFG.MAX_PER_HR}
-
-**Config:**
-MCAP: $${fmt(CFG.MIN_MCAP)}-$${fmt(CFG.MAX_MCAP)}
-Age: <${CFG.MAX_AGE_MIN}min
-Liq: $${fmt(CFG.MIN_LIQ)}+
-Vol: $${fmt(CFG.MIN_VOL)}+
-
-Ready! 💎
-`)
-.setTimestamp();
-await m.reply({ embeds: [emb] });
+    setTimeout(runScanner, CONFIG.SYSTEM.SCAN_INTERVAL_MS);
 }
 
-```
-if (c === '!stats') {
-    const up = process.uptime();
-    const h = Math.floor(up / 3600);
-    const min = Math.floor((up % 3600) / 60);
-    
-    const emb = new EmbedBuilder()
-        .setTitle('📊 STATS')
-        .setColor('#00D4FF')
-        .addFields(
-            { name: 'Uptime', value: `${h}h ${min}m`, inline: true },
-            { name: 'Active', value: `${activeCalls.size}`, inline: true },
-            { name: 'Total', value: `${processedCoins.size}`, inline: true },
-            { name: 'Rugged', value: `${ruggedCoins.size}`, inline: true },
-            { name: 'Rate', value: `${callTimes.length}/${CFG.MAX_PER_HR}`, inline: true },
-            { name: 'RAM', value: `${Math.round(process.memoryUsage().heapUsed/1024/1024)}MB`, inline: true }
-        )
-        .setTimestamp();
-    await m.reply({ embeds: [emb] });
-}
-
-if (c === '!reset') {
-    if (!m.member?.permissions.has('Administrator')) {
-        await m.reply('❌ Admin only');
+// 2. Tracker Loop
+async function runTracker() {
+    if (STATE.activeCalls.size === 0) {
+        setTimeout(runTracker, CONFIG.SYSTEM.TRACK_INTERVAL_MS);
         return;
     }
+
+    const addresses = Array.from(STATE.activeCalls.keys()).join(',');
+    // DexScreener supports up to 30 addresses per call usually, so we might need to batch in future
+    // For now, iterate individually or small batches if API allows. 
+    // Optimization: Iterate map
     
-    processedCoins.clear();
-    ruggedCoins.clear();
-    activeCalls.clear();
-    callTimes.length = 0;
-    apiCache.clear();
+    for (const [address, data] of STATE.activeCalls) {
+        try {
+            // Stop tracking if too old
+            if (Date.now() - data.startTime > (CONFIG.TRACKING.MAX_TRACK_DURATION_HR * 3600000)) {
+                STATE.removeActiveCall(address);
+                continue;
+            }
+
+            const res = await axios.get(`${CONFIG.URLS.TOKEN_API}${address}`, { timeout: 3000 });
+            const pair = res.data?.pairs?.[0]; // Get best pair
+
+            if (!pair) continue;
+
+            const currentPrice = parseFloat(pair.priceUsd);
+            const liq = pair.liquidity?.usd || 0;
+
+            // RUG CHECK
+            if (currentPrice < (data.entryPrice * (1 - CONFIG.TRACKING.STOP_LOSS_DROP)) || liq < CONFIG.TRACKING.RUG_LIQ_THRESHOLD) {
+                await sendGainUpdate(data, currentPrice, pair, 'RUG');
+                STATE.removeActiveCall(address);
+                STATE.stats.ruggedDetected++;
+                continue;
+            }
+
+            // GAIN CHECK
+            const gain = ((currentPrice - data.entryPrice) / data.entryPrice) * 100;
+            
+            // Only alert if gain > trigger AND gain > previous high + step
+            if (gain >= CONFIG.TRACKING.GAIN_TRIGGER_START) {
+                if (gain > data.highestGain + CONFIG.TRACKING.GAIN_STEP_MULTIPLIER) {
+                    await sendGainUpdate(data, currentPrice, pair, 'GAIN');
+                    data.highestGain = gain; // Update high water mark
+                }
+            }
+            
+            // Update internal max
+            if (gain > data.highestGain) data.highestGain = gain;
+
+        } catch (err) {
+            // Silent fail for tracker to keep moving
+        }
+        await Utils.sleep(500); // Pace the tracker
+    }
+
+    setTimeout(runTracker, CONFIG.SYSTEM.TRACK_INTERVAL_MS);
+}
+
+// ==================================================================================
+//  💬  COMMAND HANDLING
+// ==================================================================================
+
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+
+    if (message.content === '!test') {
+        const embed = new EmbedBuilder()
+            .setColor('#00FF00')
+            .setTitle('🟢 GREEN CHIP V4 - SYSTEM ONLINE')
+            .setDescription('All systems nominal. Ready to hunt.')
+            .addFields(
+                { name: '⏱️ Uptime', value: Utils.getAge(STATE.stats.startTime), inline: true },
+                { name: '📡 Active Tracks', value: `${STATE.activeCalls.size}`, inline: true },
+                { name: '👁️ Coins Scanned', value: `${STATE.processedHistory.size}`, inline: true },
+                { name: '🎯 Calls Today', value: `${STATE.stats.callsToday}`, inline: true },
+                { name: '🛡️ Rugs Caught', value: `${STATE.stats.ruggedDetected}`, inline: true },
+                { name: '⚙️ Memory', value: `${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`, inline: true }
+            )
+            .setFooter({ text: `Version ${CONFIG.VERSION}` });
+        
+        await message.reply({ embeds: [embed] });
+    }
+});
+
+// ==================================================================================
+//  🚀  INITIALIZATION
+// ==================================================================================
+
+client.once('ready', () => {
+    Utils.log('SUCCESS', `Logged in as ${client.user.tag}`);
+    Utils.log('INFO', `Filters: $${CONFIG.FILTERS.MIN_MCAP}-$${CONFIG.FILTERS.MAX_MCAP} MC | Age: ${CONFIG.FILTERS.MIN_AGE_MINUTES}-${CONFIG.FILTERS.MAX_AGE_MINUTES}m`);
     
-    await m.reply('✅ Reset done');
-    log('Reset by admin');
-}
-```
+    client.user.setPresence({
+        activities: [{ name: 'Solana Chain 24/7', type: ActivityType.Watching }],
+        status: 'dnd',
+    });
 
+    // Start Loops
+    runScanner();
+    runTracker();
 });
 
-// ==================== ERROR HANDLING ====================
-client.on(‘error’, (e) => log(`Discord err: ${e.message}`));
-
-process.on(‘unhandledRejection’, (e) => {
-log(`Rejection: ${e.message}`);
-});
-
-process.on(‘uncaughtException’, (e) => {
-log(`Exception: ${e.message}`);
-// Don’t exit on uncaught exceptions - keep bot running
-});
-
-process.on(‘SIGINT’, () => {
-log(‘Shutdown…’);
-client.destroy();
-server.close();
-process.exit(0);
-});
-
-process.on(‘SIGTERM’, () => {
-log(‘Shutdown…’);
-client.destroy();
-server.close();
-process.exit(0);
-});
-
-// ==================== VALIDATION & LOGIN ====================
-if (!process.env.DISCORD_TOKEN) {
-console.error(‘❌ DISCORD_TOKEN missing’);
-process.exit(1);
+// Handle Login Errors
+if (!process.env.DISCORD_TOKEN || !process.env.CHANNEL_ID) {
+    Utils.log('ERROR', 'Missing ENV variables. Check .env file.');
+    process.exit(1);
 }
 
-if (!process.env.CHANNEL_ID) {
-console.error(‘❌ CHANNEL_ID missing’);
-process.exit(1);
-}
+client.login(process.env.DISCORD_TOKEN);
 
-client.login(process.env.DISCORD_TOKEN).catch((e) => {
-log(`Login failed: ${e.message}`);
-process.exit(1);
+// Global Error Prevention
+process.on('unhandledRejection', (reason, promise) => {
+    Utils.log('ERROR', `Unhandled Rejection: ${reason}`);
+});
+
+process.on('uncaughtException', (err) => {
+    Utils.log('ERROR', `Uncaught Exception: ${err.message}`);
+    // Keep alive
 });
