@@ -2,39 +2,66 @@ const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
 
-// --- SERVER SETUP (Keeps bot alive) ---
+// --- SERVER SETUP (Keeps bot alive on Render) ---
 const app = express();
-app.get('/', (req, res) => res.send('Green Chip PRO is Running!'));
-app.listen(3000, () => console.log('Server ready.'));
+app.get('/', (req, res) => res.send('Green Chip Bot is Online! 🟢'));
+app.listen(3000, () => console.log('Web server ready.'));
 
 // --- BOT CONFIG ---
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
 });
 
-// MEMORY (To track gains)
-const activeCalls = new Map(); // Stores: { pairAddress: { initialPrice, msgId, channelId, highWaterMark } }
+// MEMORY
+const activeCalls = new Map();
 
-// --- SETTINGS ---
+// FILTERS
 const MIN_MCAP = 20000;
 const MAX_MCAP = 55000;
 const MIN_LIQUIDITY = 1500;
-const MIN_GAIN_TO_ALERT = 45; // Only reply if +45% gain
-const MAX_GAIN_CAP = 10000000; // 10M% cap
+const MIN_GAIN_TO_ALERT = 45; 
 
-// --- MAIN LOGIC ---
+// --- 1. LOGIN & START ---
 client.once('ready', () => {
-    console.log(`✅ Green Chip PRO Logged in as ${client.user.tag}`);
+    console.log(`✅ LOGGED IN AS: ${client.user.tag}`);
+    console.log(`waiting for !test command or market data...`);
     
-    // 1. Scan for NEW coins every 30 seconds
-    setInterval(scanForNewCoins, 30000);
-
-    // 2. Track GAINS on old coins every 45 seconds
-    setInterval(trackGains, 45000);
+    // Start the automatic cycles
+    setInterval(scanForNewCoins, 30000); // Scan every 30s
+    setInterval(trackGains, 45000);      // Track gains every 45s
 });
 
-// --- SCANNER FUNCTION ---
+// --- 2. LISTENER FOR !TEST COMMAND ---
+client.on('messageCreate', async (message) => {
+    // Ignore bot's own messages
+    if (message.author.bot) return;
+
+    // If user types "!test"
+    if (message.content === '!test') {
+        console.log('Test command received!');
+        
+        // Create a FAKE coin for demonstration
+        const mockPair = {
+            baseToken: { name: 'TEST COIN', symbol: 'TEST', address: 'So11111111111111111111111111111111111111112' },
+            priceUsd: '0.0025',
+            fdv: 45000,
+            liquidity: { usd: 5000 },
+            volume: { h24: 12000 },
+            pairAddress: 'mock-address'
+        };
+
+        await sendCall(mockPair, message.channel.id);
+        message.reply("✅ Test successful! If you see the embed above, I am working.");
+    }
+});
+
+// --- 3. SCANNER LOGIC ---
 async function scanForNewCoins() {
+    console.log('...Scanning Solana Market...');
     try {
         const response = await axios.get('https://api.dexscreener.com/latest/dex/search?q=solana');
         const pairs = response.data.pairs;
@@ -43,15 +70,16 @@ async function scanForNewCoins() {
 
         for (const pair of pairs) {
             if (pair.chainId !== 'solana') continue;
-            if (activeCalls.has(pair.pairAddress)) continue; // Already called this coin
+            if (activeCalls.has(pair.pairAddress)) continue;
 
             const mcap = pair.fdv || pair.marketCap;
             const liquidity = pair.liquidity?.usd || 0;
             const vol = pair.volume?.h24 || 0;
 
-            // STRICT FILTER RULES
+            // STRICT FILTERS
             if (mcap >= MIN_MCAP && mcap <= MAX_MCAP && liquidity >= MIN_LIQUIDITY && vol > 500) {
-                await sendCall(pair);
+                console.log(`MATCH FOUND: ${pair.baseToken.name}`);
+                await sendCall(pair, process.env.CHANNEL_ID);
             }
         }
     } catch (error) {
@@ -59,10 +87,13 @@ async function scanForNewCoins() {
     }
 }
 
-// --- SEND CALL FUNCTION ---
-async function sendCall(pair) {
-    const channel = client.channels.cache.get(process.env.CHANNEL_ID);
-    if (!channel) return;
+// --- 4. SEND ALERT FUNCTION ---
+async function sendCall(pair, channelId) {
+    const channel = client.channels.cache.get(channelId);
+    if (!channel) {
+        console.log("Channel not found!");
+        return;
+    }
 
     const price = parseFloat(pair.priceUsd);
 
@@ -80,22 +111,23 @@ async function sendCall(pair) {
 
     const sentMsg = await channel.send({ embeds: [embed] });
 
-    // SAVE TO MEMORY FOR TRACKING
-    activeCalls.set(pair.pairAddress, {
-        initialPrice: price,
-        msgId: sentMsg.id,
-        channelId: channel.id,
-        highestGain: 0,
-        address: pair.baseToken.address,
-        name: pair.baseToken.name
-    });
+    // Track it
+    if (pair.pairAddress !== 'mock-address') {
+        activeCalls.set(pair.pairAddress, {
+            initialPrice: price,
+            msgId: sentMsg.id,
+            channelId: channel.id,
+            highestGain: 0,
+            address: pair.baseToken.address,
+            name: pair.baseToken.name
+        });
+    }
 }
 
-// --- TRACK GAINS FUNCTION ---
+// --- 5. GAIN TRACKING ---
 async function trackGains() {
     for (const [pairAddress, data] of activeCalls) {
         try {
-            // Check current price
             const res = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${pairAddress}`);
             if (!res.data.pairs || res.data.pairs.length === 0) continue;
 
@@ -103,49 +135,36 @@ async function trackGains() {
             const currentPrice = parseFloat(currentPair.priceUsd);
             const currentLiq = currentPair.liquidity?.usd || 0;
 
-            // ANTI-RUG: Stop tracking if liquidity dies (< $100)
             if (currentLiq < 100) {
-                activeCalls.delete(pairAddress);
+                activeCalls.delete(pairAddress); // Rugged
                 continue;
             }
 
-            // CALC GAIN
             const gainPct = ((currentPrice - data.initialPrice) / data.initialPrice) * 100;
 
-            // IF GAIN > 45% AND NEW HIGH SCORE
             if (gainPct >= MIN_GAIN_TO_ALERT && gainPct > data.highestGain) {
-                // Update memory so we don't spam the same percentage
-                // Only alert on significant steps (e.g. 45%, 100%, 200%)
                 if (gainPct > (data.highestGain + 20)) { 
                     data.highestGain = gainPct;
                     await sendUpdate(data, gainPct, currentPrice);
                 }
             }
-
-        } catch (e) {
-            console.error(`Tracking Error for ${data.name}: ${e.message}`);
-        }
+        } catch (e) { console.error(e.message); }
     }
 }
 
-// --- REPLY UPDATE FUNCTION ---
 async function sendUpdate(data, gainPct, currentPrice) {
     const channel = client.channels.cache.get(data.channelId);
     if (!channel) return;
-
     try {
         const originalMsg = await channel.messages.fetch(data.msgId);
         if (originalMsg) {
             const gainEmbed = new EmbedBuilder()
                 .setTitle(`🚀 **GAIN UPDATE: +${gainPct.toFixed(2)}%**`)
-                .setColor('#FFD700') // Gold
+                .setColor('#FFD700')
                 .setDescription(`**${data.name}** is pumping!\nCurrent Price: $${currentPrice}\n\n[👉 Check on GMGN](https://gmgn.ai/r/Greenchip)`);
-            
             await originalMsg.reply({ embeds: [gainEmbed] });
         }
-    } catch (err) {
-        console.log("Could not find original message to reply to.");
-    }
+    } catch (err) {}
 }
 
 client.login(process.env.DISCORD_TOKEN);
