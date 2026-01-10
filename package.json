@@ -1,7 +1,6 @@
 {
   "name": "green-chip-bot",
-  "version": "1.0.0",
-  "description": "Solana Trading Bot",
+  "version": "3.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,9 +8,7 @@
   "dependencies": {
     "discord.js": "^14.14.1",
     "axios": "^1.6.7",
-    "express": "^4.18.2"
-  },
-  "engines": {
-    "node": ">=16.9.0"
+    "express": "^4.18.2",
+    "moment": "^2.30.1"
   }
 }
