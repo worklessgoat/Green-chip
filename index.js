@@ -2,6 +2,7 @@
 //  🟢 GREEN CHIP V4 ULTRA - PRODUCTION GRADE SOLANA TRACKER
 //  Target: 1m-1h Age | $20k-$55k MC | High Vol | Anti-Rug | Social Hype Analysis
 //  Author: Gemini (AI) for GreenChip
+//  Updated: Fixed 429 Rate Limits for Render Hosting
 // ==================================================================================
 
 require('dotenv').config();
@@ -11,13 +12,13 @@ const express = require('express');
 const moment = require('moment');
 
 // ==================================================================================
-//  ⚙️  CONFIGURATION MATRIX (TUNE THESE CAREFULLY)
+//  ⚙️  CONFIGURATION MATRIX
 // ==================================================================================
 
 const CONFIG = {
     // --- Identification ---
     BOT_NAME: "Green Chip V4",
-    VERSION: "4.0.0-PRO",
+    VERSION: "4.0.1-STABLE",
     
     // --- Discovery Filters ---
     FILTERS: {
@@ -29,7 +30,7 @@ const CONFIG = {
         MAX_AGE_MINUTES: 60,    // Only fresh coins
         MAX_PRICE_USD: 1.0,     // Avoid weird pegged tokens
         REQUIRE_SOCIALS: true,  // Must have Twitter/TG/Website
-        MAX_SYM_LENGTH: 15,     // Filter out spam names like "ELONCUMMARS..."
+        MAX_SYM_LENGTH: 15,     // Filter out spam names
         MIN_HYPE_SCORE: 10      // Internal score (Vol/Liq ratio * social bonus)
     },
 
@@ -40,12 +41,12 @@ const CONFIG = {
         MAX_GAIN_PERCENT: 10000000,  // Cap at 10M%
         STOP_LOSS_DROP: 0.90,        // Stop if drops 90% from entry
         RUG_LIQ_THRESHOLD: 300,      // If liq drops below $300, it's a rug
-        MAX_TRACK_DURATION_HR: 24    // Stop tracking after 24h to save RAM
+        MAX_TRACK_DURATION_HR: 24    // Stop tracking after 24h
     },
 
-    // --- System Intervals ---
+    // --- System Intervals (TUNED FOR RENDER) ---
     SYSTEM: {
-        SCAN_INTERVAL_MS: 4000,      // Scan every 4 seconds
+        SCAN_INTERVAL_MS: 12000,     // Increased to 12s to prevent 429s
         TRACK_INTERVAL_MS: 15000,    // Check gains every 15 seconds
         CACHE_CLEANUP_MS: 3600000,   // Clean memory every hour
         RATE_LIMIT_DELAY: 2000       // Pause between Discord sends
@@ -107,7 +108,7 @@ const Utils = {
 class StateManager {
     constructor() {
         this.activeCalls = new Map(); // Stores currently tracked coins
-        this.processedHistory = new Set(); // Stores addresses seen to prevent duplicates
+        this.processedHistory = new Set(); // Stores addresses seen
         this.stats = {
             callsToday: 0,
             startTime: Date.now(),
@@ -190,11 +191,11 @@ class CoinAnalyzer {
         const ratio = vol / liq;
         if (ratio > 0.5) score += 10;
         if (ratio > 1.0) score += 20;
-        if (ratio > 5.0) score += 40; // Extremely high volume
+        if (ratio > 5.0) score += 40; 
 
         // 2. Socials Presence
         const socials = pair.info?.socials || [];
-        score += (socials.length * 15); // +15 per social link
+        score += (socials.length * 15); 
         
         // 3. Website check
         const hasWeb = socials.find(s => s.type === 'website');
@@ -205,8 +206,8 @@ class CoinAnalyzer {
 
     static getStatusBadge(pair) {
         const dexId = (pair.dexId || '').toLowerCase();
-        if (dexId === 'raydium') return { text: '🎓 RAYDIUM GRADUATED', emoji: '🌟', color: '#00D4FF' }; // Blue
-        if (dexId === 'pump') return { text: '🚀 PUMP.FUN LIVE', emoji: '💊', color: '#14F195' }; // Solana Green
+        if (dexId === 'raydium') return { text: '🎓 RAYDIUM GRADUATED', emoji: '🌟', color: '#00D4FF' }; 
+        if (dexId === 'pump') return { text: '🚀 PUMP.FUN LIVE', emoji: '💊', color: '#14F195' }; 
         return { text: '⚡ DEX LISTED', emoji: '⚡', color: '#FFFFFF' };
     }
 
@@ -229,7 +230,7 @@ class CoinAnalyzer {
         const createdAt = pair.pairCreatedAt; 
         if (!createdAt) return { valid: false, reason: 'Unknown Age' };
         const ageMins = (Date.now() - createdAt) / 60000;
-        if (ageMins < CONFIG.FILTERS.MIN_AGE_MINUTES) return { valid: false, reason: 'Too New (Insta-Rug Risk)' };
+        if (ageMins < CONFIG.FILTERS.MIN_AGE_MINUTES) return { valid: false, reason: 'Too New' };
         if (ageMins > CONFIG.FILTERS.MAX_AGE_MINUTES) return { valid: false, reason: 'Too Old' };
 
         // 3. Liquidity & Volume
@@ -238,9 +239,9 @@ class CoinAnalyzer {
         if (liq < CONFIG.FILTERS.MIN_LIQUIDITY) return { valid: false, reason: 'Low Liq' };
         if (vol < CONFIG.FILTERS.MIN_VOLUME_H1) return { valid: false, reason: 'Dead Volume' };
 
-        // 4. Socials (The "Real Coin" Check)
+        // 4. Socials
         const socials = pair.info?.socials || [];
-        if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) return { valid: false, reason: 'No Socials (Ghost)' };
+        if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) return { valid: false, reason: 'No Socials' };
 
         // 5. Spam Name Filter
         if (pair.baseToken.symbol.length > CONFIG.FILTERS.MAX_SYM_LENGTH) return { valid: false, reason: 'Spam Symbol' };
@@ -384,14 +385,15 @@ Current MC: \`${Utils.formatUSD(mc)}\`
 //  🔄  CORE LOOPS (SCANNER & TRACKER)
 // ==================================================================================
 
-// 1. Scanner Loop
+// 1. Scanner Loop - WITH 429 PROTECTION
 async function runScanner() {
     try {
         STATE.stats.apiRequests++;
         const res = await axios.get(CONFIG.URLS.DEX_API, {
             timeout: 5000,
             headers: { 
-                'User-Agent': 'Mozilla/5.0',
+                // Spoof a real browser to avoid instant blocks
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                 'Accept': 'application/json'
             }
         });
@@ -408,12 +410,24 @@ async function runScanner() {
                 await Utils.sleep(CONFIG.SYSTEM.RATE_LIMIT_DELAY); // Prevent rate limit
             }
         }
+        
+        // Success? Wait normal interval
+        setTimeout(runScanner, CONFIG.SYSTEM.SCAN_INTERVAL_MS);
 
     } catch (err) {
-        Utils.log('WARN', `Scanner API Error: ${err.message}`);
-    }
+        // ⚠️ HANDLE 429 ERRORS (RATE LIMITS)
+        if (err.response && err.response.status === 429) {
+            Utils.log('WARN', `⛔ RATE LIMITED (429). Cooling down for 60 seconds...`);
+            // Wait 60 seconds before trying again to clear the ban
+            setTimeout(runScanner, 60000); 
+            return;
+        }
 
-    setTimeout(runScanner, CONFIG.SYSTEM.SCAN_INTERVAL_MS);
+        // Handle other errors (Network, 500s, etc)
+        Utils.log('WARN', `Scanner API Error: ${err.message}`);
+        // Retry slower (20 seconds) if API is acting up
+        setTimeout(runScanner, 20000);
+    }
 }
 
 // 2. Tracker Loop
@@ -423,11 +437,6 @@ async function runTracker() {
         return;
     }
 
-    const addresses = Array.from(STATE.activeCalls.keys()).join(',');
-    // DexScreener supports up to 30 addresses per call usually, so we might need to batch in future
-    // For now, iterate individually or small batches if API allows. 
-    // Optimization: Iterate map
-    
     for (const [address, data] of STATE.activeCalls) {
         try {
             // Stop tracking if too old
@@ -436,7 +445,10 @@ async function runTracker() {
                 continue;
             }
 
-            const res = await axios.get(`${CONFIG.URLS.TOKEN_API}${address}`, { timeout: 3000 });
+            const res = await axios.get(`${CONFIG.URLS.TOKEN_API}${address}`, { 
+                timeout: 3000,
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+            });
             const pair = res.data?.pairs?.[0]; // Get best pair
 
             if (!pair) continue;
@@ -455,7 +467,6 @@ async function runTracker() {
             // GAIN CHECK
             const gain = ((currentPrice - data.entryPrice) / data.entryPrice) * 100;
             
-            // Only alert if gain > trigger AND gain > previous high + step
             if (gain >= CONFIG.TRACKING.GAIN_TRIGGER_START) {
                 if (gain > data.highestGain + CONFIG.TRACKING.GAIN_STEP_MULTIPLIER) {
                     await sendGainUpdate(data, currentPrice, pair, 'GAIN');
@@ -463,7 +474,6 @@ async function runTracker() {
                 }
             }
             
-            // Update internal max
             if (gain > data.highestGain) data.highestGain = gain;
 
         } catch (err) {
