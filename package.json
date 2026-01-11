@@ -1,14 +1,27 @@
 {
-  "name": "green-chip-bot",
-  "version": "4.0.0",
+  "name": "green-chip-v7",
+  "version": "7.0.0",
+  "description": "Green Chip V7 Fortified - Zero Duplicates Edition",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
+  "keywords": [
+    "solana",
+    "discord-bot",
+    "crypto",
+    "meme-coins"
+  ],
+  "author": "Gemini (AI) for GreenChip",
+  "license": "ISC",
   "dependencies": {
-    "discord.js": "^14.14.1",
     "axios": "^1.6.7",
-    "express": "^4.18.2",
-    "moment": "^2.30.1"
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=16.9.0"
   }
 }
