@@ -2,7 +2,7 @@
 //  🟢 GREEN CHIP V4 ULTRA - PRODUCTION GRADE SOLANA TRACKER
 //  Target: 1m-1h Age | $10k-$90k MC | High Vol | Anti-Rug | Social Hype Analysis
 //  Author: Gemini (AI) for GreenChip
-//  Updated: FIXED GAIN LAG (Instant Alerts), Optimized Volume, Stable Connection
+//  Updated: RESTORED V4 RATE LIMIT (60s Safety), Fixed Lag, High Vol
 // ==================================================================================
 
 require('dotenv').config();
@@ -28,7 +28,7 @@ const cron = require('node-cron');
 const CONFIG = {
     // --- Identification ---
     BOT_NAME: "Green Chip V4",
-    VERSION: "4.1.2-FAST",
+    VERSION: "4.1.3-SAFE",
     TIMEZONE: "America/New_York", 
     
     // --- Discovery Filters ---
@@ -36,7 +36,7 @@ const CONFIG = {
         MIN_MCAP: 10000,        
         MAX_MCAP: 90000,        
         MIN_LIQUIDITY: 1500,    
-        MIN_VOLUME_H1: 1000,    // Adjusted to $1k so we don't miss 1-minute old coins
+        MIN_VOLUME_H1: 1000,    // High quality organic volume
         MIN_AGE_MINUTES: 1,     
         MAX_AGE_MINUTES: 60,    
         MAX_PRICE_USD: 1.0,     
@@ -56,7 +56,7 @@ const CONFIG = {
     // --- System Intervals ---
     SYSTEM: {
         SCAN_INTERVAL_MS: 12000,     
-        TRACK_INTERVAL_MS: 10000,    // Faster Tracking (10s) for snappier updates
+        TRACK_INTERVAL_MS: 10000,    
         CACHE_CLEANUP_MS: 3600000,   
         RATE_LIMIT_DELAY: 2000       
     },
@@ -468,15 +468,16 @@ async function runScanner() {
 
     } catch (err) {
         if (err.response && err.response.status === 429) {
-            Utils.log('WARN', `⛔ RATE LIMITED (429). Retrying in 5s...`);
-            setTimeout(runScanner, 5000); 
+            // ✅ V4 SAFETY FIX: Wait 60s to clear ban
+            Utils.log('WARN', `⛔ RATE LIMITED (429). Cooling down for 60 seconds...`);
+            setTimeout(runScanner, 60000); 
             return;
         }
         setTimeout(runScanner, 20000);
     }
 }
 
-// 2. Tracker Loop (FIXED LAG ISSUES)
+// 2. Tracker Loop
 async function runTracker() {
     if (STATE.activeCalls.size === 0) {
         setTimeout(runTracker, CONFIG.SYSTEM.TRACK_INTERVAL_MS);
@@ -509,24 +510,20 @@ async function runTracker() {
                 continue;
             }
 
-            // GAIN CHECK - SMART MILESTONE LOGIC (NO LAG)
+            // GAIN CHECK - SMART MILESTONE LOGIC
             const gain = ((currentPrice - data.entryPrice) / data.entryPrice) * 100;
             
             Leaderboard.updateGain(address, gain);
             if (gain > data.highestGain) data.highestGain = gain;
 
-            // Find all pending milestones that we crossed
             const crossedMilestones = CONFIG.TRACKING.GAIN_MILESTONES.filter(m => 
                 gain >= m && !data.milestonesCleared.includes(m)
             );
 
-            // If we crossed any, pick the HIGHEST one to report (skip the small ones)
             if (crossedMilestones.length > 0) {
-                const highestMilestone = crossedMilestones[crossedMilestones.length - 1]; // Get the last (highest) one
-
+                // Pick highest, skip small ones
+                const highestMilestone = crossedMilestones[crossedMilestones.length - 1]; 
                 await sendGainUpdate(data, currentPrice, pair, 'GAIN');
-
-                // Mark ALL crossed milestones as cleared so we don't alert them later
                 crossedMilestones.forEach(m => data.milestonesCleared.push(m));
             }
 
