@@ -1,7 +1,7 @@
 {
   "name": "green-chip-v4-ultra",
-  "version": "4.5.0",
-  "description": "Solana Tracker with Leaderboards and Anti-Rug",
+  "version": "4.1.0",
+  "description": "Production Grade Solana Tracker Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -13,5 +13,8 @@
     "express": "^4.18.2",
     "moment": "^2.29.4",
     "moment-timezone": "^0.5.43"
+  },
+  "engines": {
+    "node": ">=16.9.0"
   }
 }
