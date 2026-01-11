@@ -2,7 +2,7 @@
 //  🟢 GREEN CHIP V5 ULTRA - MULTI-ENGINE SOLANA TRACKER
 //  Engines: PumpFun | Axiom Pulse | Sniper Watch | Standard Safe
 //  Author: Gemini (AI) for GreenChip
-//  Updated: Added 4 Scan Engines, V2 Anti-Rug, Hype Analysis, Expanded Codebase
+//  Updated: Added 'Heartbeat' Logging to prove scanner is working
 // ==================================================================================
 
 require('dotenv').config();
@@ -27,7 +27,7 @@ const cron = require('node-cron');
 
 const CONFIG = {
     BOT_NAME: "Green Chip V5",
-    VERSION: "5.0.1-MAX-DEGEN",
+    VERSION: "5.0.2-LIVE-LOGS",
     TIMEZONE: "America/New_York", 
     
     // --- Master Limits ---
@@ -63,7 +63,6 @@ const CONFIG = {
 
 // ==================================================================================
 //  🔥  SCAN ENGINE CONFIGURATIONS
-//  Each engine has its own strict/loose rules to find different coin types.
 // ==================================================================================
 
 const ENGINES = {
@@ -192,7 +191,7 @@ class StateManager {
 
     addProcessed(address) {
         this.processedHistory.add(address);
-        if (this.processedHistory.size > 8000) { // Increased memory
+        if (this.processedHistory.size > 8000) { 
             const it = this.processedHistory.values();
             this.processedHistory.delete(it.next().value);
         }
@@ -324,7 +323,7 @@ class CoinAnalyzer {
         // Momentum Ratio
         const ratio = vol / liq;
         if (ratio > 0.5) score += 10;
-        if (ratio > 2.0) score += 20; // High momentum
+        if (ratio > 2.0) score += 20; 
         
         // Socials Check
         const socials = pair.info?.socials || [];
@@ -348,7 +347,6 @@ class CoinAnalyzer {
         if (liq < CONFIG.GLOBAL_LIMITS.MIN_LIQUIDITY) return { safe: false, reason: 'No Liquidity' };
         
         // 2. Suspicious Liquidity Ratio (Wash trading check)
-        // If MC is $100k but Liq is $100, it's a scam.
         if (mc > 20000 && liq < 500) return { safe: false, reason: 'Liquidity Mismatch (Honey Pot Risk)' };
 
         // 3. Price Peg Check (Stablecoin scams)
@@ -525,6 +523,9 @@ async function runScanner() {
 
         const pairs = res.data?.pairs || [];
 
+        // 🟢 HEARTBEAT LOG (THIS TELLS YOU IT IS WORKING)
+        Utils.log('INFO', `Scanning ${pairs.length} pairs across 4 engines...`);
+
         for (const pair of pairs) {
             // Check against ALL engines
             const matchedEngines = CoinAnalyzer.determineEngines(pair);
@@ -545,6 +546,7 @@ async function runScanner() {
             setTimeout(runScanner, CONFIG.SYSTEM.RETRY_TIMEOUT_MS); 
             return;
         }
+        Utils.log('WARN', `Scanner API Error: ${err.message}`);
         setTimeout(runScanner, 20000);
     }
 }
