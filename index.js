@@ -2,7 +2,7 @@
 //  🟢 GREEN CHIP V5 ULTRA - MULTI-ENGINE SOLANA TRACKER
 //  Engines: PumpFun | Axiom Pulse | Sniper Watch | Standard Safe
 //  Author: Gemini (AI) for GreenChip
-//  Updated: Added 'Heartbeat' Logging to prove scanner is working
+//  Updated: SAFE MODE (Slower intervals to fix 429 Bans)
 // ==================================================================================
 
 require('dotenv').config();
@@ -27,31 +27,30 @@ const cron = require('node-cron');
 
 const CONFIG = {
     BOT_NAME: "Green Chip V5",
-    VERSION: "5.0.2-LIVE-LOGS",
+    VERSION: "5.0.3-SAFE-MODE",
     TIMEZONE: "America/New_York", 
     
     // --- Master Limits ---
     GLOBAL_LIMITS: {
-        MAX_MCAP: 90000,        // Global hard cap as requested
-        MIN_LIQUIDITY: 1000,    // Safety floor
-        MAX_AGE_MINUTES: 60     // Hard cutoff
+        MAX_MCAP: 90000,        
+        MIN_LIQUIDITY: 1000,    
+        MAX_AGE_MINUTES: 60     
     },
 
     // --- Tracking Strategy ---
     TRACKING: {
-        // Smart Milestones: Skips small alerts if coin moons instantly
         GAIN_MILESTONES: [50, 100, 200, 300, 400, 500, 1000, 2000, 5000, 10000], 
-        STOP_LOSS_DROP: 0.85,        // Looser stop loss for volatility
-        RUG_LIQ_THRESHOLD: 200,      // If liq drops below $200 = RUG
+        STOP_LOSS_DROP: 0.85,        
+        RUG_LIQ_THRESHOLD: 200,      
         MAX_TRACK_DURATION_HR: 24    
     },
 
-    // --- System Intervals ---
+    // --- System Intervals (SLOWED DOWN FOR SAFETY) ---
     SYSTEM: {
-        SCAN_INTERVAL_MS: 15000,     // 15s to be safe with heavy processing
-        TRACK_INTERVAL_MS: 8000,     // Fast tracking (8s)
-        RATE_LIMIT_DELAY: 2000,      // Discord send delay
-        RETRY_TIMEOUT_MS: 60000      // 60s wait if banned (Safety First)
+        SCAN_INTERVAL_MS: 30000,     // 30s (Slower to clear ban)
+        TRACK_INTERVAL_MS: 20000,    // 20s (Slower to clear ban)
+        RATE_LIMIT_DELAY: 2000,      
+        RETRY_TIMEOUT_MS: 60000      
     },
 
     URLS: {
@@ -66,55 +65,55 @@ const CONFIG = {
 // ==================================================================================
 
 const ENGINES = {
-    // 1. THE PUMPFUN DEGEN (Finds Pump.fun coins with volume)
+    // 1. THE PUMPFUN DEGEN
     PUMP_TURBO: {
         id: 'PUMP_TURBO',
         name: '💊 PumpFun Turbo',
         emoji: '💊',
-        color: '#14F195', // Green
+        color: '#14F195', 
         filter: (pair) => {
             if (pair.dexId !== 'pump') return false;
             if (pair.marketCap > 90000) return false;
-            if (pair.volume?.h1 < 1000) return false; // Needs active trading
+            if (pair.volume?.h1 < 1000) return false; 
             return true;
         }
     },
 
-    // 2. AXIOM PULSE / GRADUATING (High Quality, Socials Required)
+    // 2. AXIOM PULSE / GRADUATING
     AXIOM_PULSE: {
         id: 'AXIOM_PULSE',
         name: '⚡ Axiom/Pulse Trend',
         emoji: '⚡',
-        color: '#00D4FF', // Blue
+        color: '#00D4FF', 
         filter: (pair) => {
             const socials = pair.info?.socials || [];
-            if (socials.length === 0) return false; // Strict Socials
-            if (pair.volume?.h1 < 2000) return false; // Higher volume req
+            if (socials.length === 0) return false; 
+            if (pair.volume?.h1 < 2000) return false; 
             const hype = CoinAnalyzer.calculateHypeScore(pair);
-            return hype > 30; // Must have hype
+            return hype > 30; 
         }
     },
 
-    // 3. SNIPER WATCH (Very new, insane volume)
+    // 3. SNIPER WATCH
     SNIPER_WATCH: {
         id: 'SNIPER_WATCH',
         name: '🎯 Sniper Watch',
         emoji: '🎯',
-        color: '#FF0000', // Red
+        color: '#FF0000', 
         filter: (pair) => {
             const ageMins = Utils.getAgeNumber(pair.pairCreatedAt);
-            if (ageMins > 10) return false; // Only first 10 mins
-            if (pair.volume?.h1 < 3000) return false; // Massive volume start
+            if (ageMins > 10) return false; 
+            if (pair.volume?.h1 < 3000) return false; 
             return true;
         }
     },
 
-    // 4. STANDARD SAFE (Your original balanced filter)
+    // 4. STANDARD SAFE
     STANDARD: {
         id: 'STANDARD',
         name: '🟢 Standard High Vol',
         emoji: '🟢',
-        color: '#FFFFFF', // White
+        color: '#FFFFFF', 
         filter: (pair) => {
             if (pair.marketCap < 10000 || pair.marketCap > 90000) return false;
             if (pair.volume?.h1 < 1000) return false;
@@ -320,19 +319,16 @@ class CoinAnalyzer {
         const vol = pair.volume?.h1 || 0;
         const liq = pair.liquidity?.usd || 1;
         
-        // Momentum Ratio
         const ratio = vol / liq;
         if (ratio > 0.5) score += 10;
         if (ratio > 2.0) score += 20; 
         
-        // Socials Check
         const socials = pair.info?.socials || [];
         score += (socials.length * 20); 
         
         const hasWeb = socials.find(s => s.type === 'website');
         if (hasWeb) score += 15;
 
-        // Image Check (No image = usually scam)
         if (pair.info?.imageUrl) score += 10;
 
         return score;
@@ -340,16 +336,13 @@ class CoinAnalyzer {
 
     // New Anti-Rug Checks
     static securityCheck(pair) {
-        // 1. Liquidity Health
         const liq = pair.liquidity?.usd || 0;
         const mc = pair.fdv || pair.marketCap || 0;
         
         if (liq < CONFIG.GLOBAL_LIMITS.MIN_LIQUIDITY) return { safe: false, reason: 'No Liquidity' };
         
-        // 2. Suspicious Liquidity Ratio (Wash trading check)
         if (mc > 20000 && liq < 500) return { safe: false, reason: 'Liquidity Mismatch (Honey Pot Risk)' };
 
-        // 3. Price Peg Check (Stablecoin scams)
         if (parseFloat(pair.priceUsd) > 1.5) return { safe: false, reason: 'Suspicious Price Peg' };
 
         return { safe: true };
@@ -358,14 +351,12 @@ class CoinAnalyzer {
     static determineEngines(pair) {
         let matches = [];
 
-        // Global basic filter first (saves CPU)
         if (STATE.isProcessed(pair.baseToken.address)) return [];
         if (pair.chainId !== 'solana') return [];
 
         const secCheck = this.securityCheck(pair);
         if (!secCheck.safe) return [];
 
-        // Run through all engines
         if (ENGINES.PUMP_TURBO.filter(pair)) matches.push(ENGINES.PUMP_TURBO);
         else if (ENGINES.AXIOM_PULSE.filter(pair)) matches.push(ENGINES.AXIOM_PULSE);
         else if (ENGINES.SNIPER_WATCH.filter(pair)) matches.push(ENGINES.SNIPER_WATCH);
@@ -509,7 +500,7 @@ async function postLeaderboard(type) {
 //  🔄  MULTI-ENGINE CORE LOOPS
 // ==================================================================================
 
-// 1. Master Scanner (Feeds all 4 engines)
+// 1. Master Scanner
 async function runScanner() {
     try {
         STATE.stats.apiRequests++;
@@ -523,15 +514,13 @@ async function runScanner() {
 
         const pairs = res.data?.pairs || [];
 
-        // 🟢 HEARTBEAT LOG (THIS TELLS YOU IT IS WORKING)
+        // 🟢 HEARTBEAT LOG
         Utils.log('INFO', `Scanning ${pairs.length} pairs across 4 engines...`);
 
         for (const pair of pairs) {
-            // Check against ALL engines
             const matchedEngines = CoinAnalyzer.determineEngines(pair);
 
             if (matchedEngines.length > 0) {
-                // If it matches multiple (rare), just pick the first (highest priority)
                 const engine = matchedEngines[0];
                 STATE.addProcessed(pair.baseToken.address);
                 await sendCallAlert(pair, engine);
@@ -560,7 +549,6 @@ async function runTracker() {
 
     for (const [address, data] of STATE.activeCalls) {
         try {
-            // Expiry Check
             if (Date.now() - data.startTime > (CONFIG.TRACKING.MAX_TRACK_DURATION_HR * 3600000)) {
                 STATE.removeActiveCall(address);
                 continue;
@@ -577,7 +565,6 @@ async function runTracker() {
             const currentPrice = parseFloat(pair.priceUsd);
             const liq = pair.liquidity?.usd || 0;
 
-            // RUG CHECK V2 (Using Liq Threshold)
             if (currentPrice < (data.entryPrice * (1 - CONFIG.TRACKING.STOP_LOSS_DROP)) || liq < CONFIG.TRACKING.RUG_LIQ_THRESHOLD) {
                 await sendGainUpdate(data, currentPrice, pair, 'RUG');
                 STATE.removeActiveCall(address);
@@ -585,13 +572,11 @@ async function runTracker() {
                 continue;
             }
 
-            // GAIN CHECK
             const gain = ((currentPrice - data.entryPrice) / data.entryPrice) * 100;
             
             Leaderboard.updateGain(address, gain);
             if (gain > data.highestGain) data.highestGain = gain;
 
-            // Milestones
             const crossedMilestones = CONFIG.TRACKING.GAIN_MILESTONES.filter(m => 
                 gain >= m && !data.milestonesCleared.includes(m)
             );
@@ -603,7 +588,7 @@ async function runTracker() {
 
         } catch (err) {
              if (err.response && err.response.status === 429) {
-                break; // Skip cycle if rated
+                break; 
             }
         }
         await Utils.sleep(500); 
