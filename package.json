@@ -1,7 +1,7 @@
 {
-  "name": "green-chip-v9-empire",
-  "version": "9.0.0",
-  "description": "The ultimate Solana trading engine for Green Chip.",
+  "name": "green-chip-v6-god-mode",
+  "version": "6.0.0",
+  "description": "Enterprise-grade Solana meme coin tracker with multi-threaded scanning and auto-trading intelligence.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
