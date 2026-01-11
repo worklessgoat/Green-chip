@@ -30,7 +30,7 @@ const CONFIG = {
     BOT_NAME: "Green Chip V4",
     VERSION: "4.1.0-STABLE",
     // CHANGE THIS TO YOUR DESIRED TIMEZONE (e.g., 'America/New_York', 'Asia/Manila')
-    TIMEZONE: "Asia/Manila", 
+    TIMEZONE: "America/New_York", // Set to United States (Eastern Time)
     
     // --- Discovery Filters ---
     FILTERS: {
