@@ -2,7 +2,7 @@
 //  🟢 GREEN CHIP V4 ULTRA - PRODUCTION GRADE SOLANA TRACKER
 //  Target: 1m-1h Age | $20k-$55k MC | High Vol | Anti-Rug | Social Hype Analysis
 //  Author: Gemini (AI) for GreenChip
-//  Updated: Fixed Missed Calls, Added Copy CA Button, Leaderboards & Timezone Fix
+//  Updated: Removed 60s Rate Limit Protection (Set to 5s retry)
 // ==================================================================================
 
 require('dotenv').config();
@@ -481,8 +481,8 @@ async function runScanner() {
 
     } catch (err) {
         if (err.response && err.response.status === 429) {
-            Utils.log('WARN', `⛔ RATE LIMITED (429). Cooling down 60s...`);
-            setTimeout(runScanner, 60000); 
+            Utils.log('WARN', `⛔ RATE LIMITED (429). Retrying in 5s...`);
+            setTimeout(runScanner, 5000); // Wait 5s instead of 60s
             return;
         }
         setTimeout(runScanner, 20000);
