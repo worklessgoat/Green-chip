@@ -1,8 +1,8 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V5 ULTRA - MULTI-ENGINE SOLANA TRACKER
+//  🟢 GREEN CHIP V5 TURBO - HIGH SPEED SOLANA TRACKER
 //  Engines: PumpFun | Axiom Pulse | Sniper Watch | Standard Safe
 //  Author: Gemini (AI) for GreenChip
-//  Updated: SAFE MODE (Slower intervals to fix 429 Bans)
+//  Updated: Restored V4 Speed Settings (12s Intervals) for Max Profitability
 // ==================================================================================
 
 require('dotenv').config();
@@ -26,8 +26,8 @@ const cron = require('node-cron');
 // ==================================================================================
 
 const CONFIG = {
-    BOT_NAME: "Green Chip V5",
-    VERSION: "5.0.3-SAFE-MODE",
+    BOT_NAME: "Green Chip V5 Turbo",
+    VERSION: "5.1.0-TURBO",
     TIMEZONE: "America/New_York", 
     
     // --- Master Limits ---
@@ -45,12 +45,12 @@ const CONFIG = {
         MAX_TRACK_DURATION_HR: 24    
     },
 
-    // --- System Intervals (SLOWED DOWN FOR SAFETY) ---
+    // --- System Intervals (RESTORED TO V4 SPEED) ---
     SYSTEM: {
-        SCAN_INTERVAL_MS: 30000,     // 30s (Slower to clear ban)
-        TRACK_INTERVAL_MS: 20000,    // 20s (Slower to clear ban)
-        RATE_LIMIT_DELAY: 2000,      
-        RETRY_TIMEOUT_MS: 60000      
+        SCAN_INTERVAL_MS: 12000,     // Back to 12s (V4 Speed)
+        TRACK_INTERVAL_MS: 10000,    // Back to 10s (High Speed Tracking)
+        RATE_LIMIT_DELAY: 1500,      // Reduced delay for faster sends
+        RETRY_TIMEOUT_MS: 15000      // Only wait 15s if banned (Aggressive)
     },
 
     URLS: {
@@ -286,7 +286,7 @@ app.get('/', (req, res) => {
         active_tracks: STATE.activeCalls.size,
         history_db: STATE.processedHistory.size,
         calls_today: STATE.stats.callsToday,
-        engine_status: 'ALL ENGINES ONLINE'
+        engine_status: 'TURBO MODE ACTIVE'
     });
 });
 
@@ -313,7 +313,6 @@ const client = new Client({
 
 class CoinAnalyzer {
     
-    // Updated Hype Algorithm
     static calculateHypeScore(pair) {
         let score = 0;
         const vol = pair.volume?.h1 || 0;
@@ -334,7 +333,6 @@ class CoinAnalyzer {
         return score;
     }
 
-    // New Anti-Rug Checks
     static securityCheck(pair) {
         const liq = pair.liquidity?.usd || 0;
         const mc = pair.fdv || pair.marketCap || 0;
@@ -514,8 +512,8 @@ async function runScanner() {
 
         const pairs = res.data?.pairs || [];
 
-        // 🟢 HEARTBEAT LOG
-        Utils.log('INFO', `Scanning ${pairs.length} pairs across 4 engines...`);
+        // 🟢 HEARTBEAT LOG (Scanning Speed)
+        Utils.log('INFO', `Scanning ${pairs.length} pairs (V4 Speed)...`);
 
         for (const pair of pairs) {
             const matchedEngines = CoinAnalyzer.determineEngines(pair);
@@ -531,7 +529,7 @@ async function runScanner() {
 
     } catch (err) {
         if (err.response && err.response.status === 429) {
-            Utils.log('WARN', `⛔ RATE LIMITED (429). Cooling down for 60s (Safety Mode)...`);
+            Utils.log('WARN', `⛔ RATE LIMITED (429). Retrying in 15s...`);
             setTimeout(runScanner, CONFIG.SYSTEM.RETRY_TIMEOUT_MS); 
             return;
         }
@@ -631,7 +629,7 @@ client.on('messageCreate', async (message) => {
     if (message.content === '!test') {
         const embed = new EmbedBuilder()
             .setColor('#00FF00')
-            .setTitle('🟢 GREEN CHIP V5 - MULTI-ENGINE ONLINE')
+            .setTitle('🟢 GREEN CHIP V5 - TURBO MODE ONLINE')
             .setDescription(`Timezone: ${CONFIG.TIMEZONE} | Time: ${Utils.getCurrentTime()}`)
             .addFields(
                 { name: '⏱️ Uptime', value: Utils.getAgeString(STATE.stats.startTime), inline: true },
