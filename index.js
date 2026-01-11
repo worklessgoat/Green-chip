@@ -1,8 +1,8 @@
 // ==================================================================================
 //  🟢 GREEN CHIP V4 ULTRA - PRODUCTION GRADE SOLANA TRACKER
-//  Target: 1m-1h Age | $20k-$55k MC | High Vol | Anti-Rug | Social Hype Analysis
+//  Target: 1m-1h Age | $10k-$90k MC | High Vol | Anti-Rug | Social Hype Analysis
 //  Author: Gemini (AI) for GreenChip
-//  Updated: Removed 60s Rate Limit Protection (Set to 5s retry)
+//  Updated: Widened MC ($10k-90k), Increased Volume Req, Green Online Status
 // ==================================================================================
 
 require('dotenv').config();
@@ -29,15 +29,14 @@ const CONFIG = {
     // --- Identification ---
     BOT_NAME: "Green Chip V4",
     VERSION: "4.1.0-STABLE",
-    // CHANGE THIS TO YOUR DESIRED TIMEZONE (e.g., 'America/New_York', 'Asia/Manila')
-    TIMEZONE: "America/New_York", // Set to United States (Eastern Time)
+    TIMEZONE: "America/New_York", 
     
     // --- Discovery Filters ---
     FILTERS: {
-        MIN_MCAP: 20000,        
-        MAX_MCAP: 55000,        
+        MIN_MCAP: 10000,        // Lowered to $10k
+        MAX_MCAP: 90000,        // Raised to $90k
         MIN_LIQUIDITY: 1500,    
-        MIN_VOLUME_H1: 500,     
+        MIN_VOLUME_H1: 1500,    // Increased to $1,500 (High Volume Bot)
         MIN_AGE_MINUTES: 1,     
         MAX_AGE_MINUTES: 60,    
         MAX_PRICE_USD: 1.0,     
@@ -48,15 +47,13 @@ const CONFIG = {
 
     // --- Tracking & Gains ---
     TRACKING: {
-        // Fixed thresholds. Logic now checks these specific numbers.
-        // If coin hits 180%, it triggers the highest cleared milestone (100%).
         GAIN_MILESTONES: [50, 100, 200, 300, 400, 500, 1000, 2000, 5000, 10000], 
         STOP_LOSS_DROP: 0.90,        
         RUG_LIQ_THRESHOLD: 300,      
         MAX_TRACK_DURATION_HR: 24    
     },
 
-    // --- System Intervals (TUNED FOR RENDER) ---
+    // --- System Intervals ---
     SYSTEM: {
         SCAN_INTERVAL_MS: 12000,     
         TRACK_INTERVAL_MS: 15000,    
@@ -79,7 +76,6 @@ const CONFIG = {
 const Utils = {
     sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
     
-    // Professional currency formatting
     formatUSD: (num) => {
         if (!num || isNaN(num)) return '$0.00';
         if (num >= 1e9) return '$' + (num / 1e9).toFixed(2) + 'B';
@@ -88,14 +84,12 @@ const Utils = {
         return '$' + num.toFixed(2);
     },
 
-    // Precise price formatting for crypto
     formatPrice: (num) => {
         if (!num || isNaN(num)) return '$0.00';
         if (num < 0.000001) return '$' + num.toFixed(10);
         return '$' + num.toFixed(6);
     },
 
-    // Time calculation (Relative)
     getAge: (timestamp) => {
         const diffMs = Date.now() - timestamp;
         const mins = Math.floor(diffMs / 60000);
@@ -105,12 +99,10 @@ const Utils = {
         return `${hours}h ${mins % 60}m ago`;
     },
 
-    // Unified Time String (fixes timezone issue across all embeds)
     getCurrentTime: () => {
         return moment().tz(CONFIG.TIMEZONE).format('h:mm:ss A');
     },
 
-    // Logger
     log: (type, message) => {
         const time = Utils.getCurrentTime();
         const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', SYSTEM: '⚙️' };
@@ -149,7 +141,7 @@ class StateManager {
     addActiveCall(data) {
         this.activeCalls.set(data.address, data);
         this.stats.callsToday++;
-        Leaderboard.recordCall(data); // Add to leaderboard tracking
+        Leaderboard.recordCall(data); 
     }
 
     removeActiveCall(address) {
@@ -193,9 +185,7 @@ class LeaderboardManager {
 
     generateLeaderboard(type) {
         const list = type === 'DAILY' ? this.dailyCalls : this.weeklyCalls;
-        
-        // Sort by highest gain descending
-        const sorted = list.sort((a, b) => b.highestGain - a.highestGain).slice(0, 10); // Top 10
+        const sorted = list.sort((a, b) => b.highestGain - a.highestGain).slice(0, 10); 
 
         if (sorted.length === 0) return "No calls recorded yet.";
 
@@ -226,7 +216,7 @@ class LeaderboardManager {
 const Leaderboard = new LeaderboardManager();
 
 // ==================================================================================
-//  🌐  EXPRESS SERVER (FOR RENDER/UPTIME)
+//  🌐  EXPRESS SERVER
 // ==================================================================================
 
 const app = express();
@@ -338,14 +328,12 @@ async function sendCallAlert(pair, metrics) {
     const status = CoinAnalyzer.getStatusBadge(pair);
     const socials = pair.info?.socials || [];
     
-    // Condensed Socials
     const linkMap = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ');
     const socialText = linkMap.length > 0 ? linkMap : "⚠️ *No social links*";
 
     const dexLink = `https://dexscreener.com/solana/${pair.pairAddress}`;
     const photonLink = `https://photon-sol.tinyastro.io/en/lp/${pair.pairAddress}`;
     
-    // COMPACT EMBED STRUCTURE (Dead spaces removed)
     const embed = new EmbedBuilder()
         .setColor(status.color)
         .setTitle(`${status.emoji} ${token.name} ($${token.symbol})`)
@@ -360,7 +348,6 @@ async function sendCallAlert(pair, metrics) {
         .setThumbnail(pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png')
         .setFooter({ text: `Green Chip V4 • ${Utils.getCurrentTime()}`, iconURL: client.user.displayAvatarURL() });
 
-    // --- BUTTON FOR COPY CA ---
     const copyButton = new ButtonBuilder()
         .setCustomId(`copy_ca_${token.address}`)
         .setLabel(`📝 Copy CA`) 
@@ -370,7 +357,7 @@ async function sendCallAlert(pair, metrics) {
 
     try {
         const msg = await channel.send({ 
-            content: `\`${token.address}\``, // Sending CA outside embed for mobile long-press
+            content: `\`${token.address}\``, 
             embeds: [embed],
             components: [row] 
         });
@@ -381,7 +368,7 @@ async function sendCallAlert(pair, metrics) {
             entryPrice: parseFloat(pair.priceUsd),
             highestPrice: parseFloat(pair.priceUsd),
             highestGain: 0,
-            milestonesCleared: [], // Track which % alerts we've sent
+            milestonesCleared: [],
             channelId: process.env.CHANNEL_ID,
             messageId: msg.id,
             startTime: Date.now(),
@@ -452,7 +439,7 @@ async function postLeaderboard(type) {
 }
 
 // ==================================================================================
-//  🔄  CORE LOOPS (SCANNER & TRACKER)
+//  🔄  CORE LOOPS
 // ==================================================================================
 
 // 1. Scanner Loop
@@ -482,14 +469,14 @@ async function runScanner() {
     } catch (err) {
         if (err.response && err.response.status === 429) {
             Utils.log('WARN', `⛔ RATE LIMITED (429). Retrying in 5s...`);
-            setTimeout(runScanner, 5000); // Wait 5s instead of 60s
+            setTimeout(runScanner, 5000); 
             return;
         }
         setTimeout(runScanner, 20000);
     }
 }
 
-// 2. Tracker Loop (FIXED MISSED REPLIES)
+// 2. Tracker Loop
 async function runTracker() {
     if (STATE.activeCalls.size === 0) {
         setTimeout(runTracker, CONFIG.SYSTEM.TRACK_INTERVAL_MS);
@@ -522,30 +509,23 @@ async function runTracker() {
                 continue;
             }
 
-            // GAIN CHECK - NEW LOGIC FOR MISSED REPLIES
+            // GAIN CHECK
             const gain = ((currentPrice - data.entryPrice) / data.entryPrice) * 100;
             
-            // Update Leaderboard Stats silently
             Leaderboard.updateGain(address, gain);
 
             if (gain > data.highestGain) data.highestGain = gain;
 
             // Check Milestones
-            // Loop through milestones. If we passed one that hasn't been sent, send it.
-            // This fixes "hitting 180% but only replying 120%"
             for (const milestone of CONFIG.TRACKING.GAIN_MILESTONES) {
                 if (gain >= milestone && !data.milestonesCleared.includes(milestone)) {
-                    // Send alert for this milestone
                     await sendGainUpdate(data, currentPrice, pair, 'GAIN');
                     
-                    // Mark this AND all lower milestones as cleared
                     CONFIG.TRACKING.GAIN_MILESTONES.forEach(m => {
                         if (m <= milestone && !data.milestonesCleared.includes(m)) {
                             data.milestonesCleared.push(m);
                         }
                     });
-                    
-                    // Break so we only send the one alert for this check cycle
                     break; 
                 }
             }
@@ -563,40 +543,32 @@ async function runTracker() {
 }
 
 // ==================================================================================
-//  ⏰  CRON SCHEDULER (LEADERBOARDS)
+//  ⏰  CRON SCHEDULER
 // ==================================================================================
 
-// Daily Leaderboard: Every day at 12:00 AM
+// Daily
 cron.schedule('0 0 * * *', () => {
     Utils.log('SYSTEM', 'Running Daily Leaderboard Task');
     postLeaderboard('DAILY');
     Leaderboard.resetDaily();
-}, {
-    timezone: CONFIG.TIMEZONE
-});
+}, { timezone: CONFIG.TIMEZONE });
 
-// Weekly Leaderboard: Every Sunday at 12:00 AM
+// Weekly
 cron.schedule('0 0 * * 0', () => {
     Utils.log('SYSTEM', 'Running Weekly Leaderboard Task');
     postLeaderboard('WEEKLY');
     Leaderboard.resetWeekly();
-}, {
-    timezone: CONFIG.TIMEZONE
-});
+}, { timezone: CONFIG.TIMEZONE });
 
 // ==================================================================================
-//  💬  COMMAND & INTERACTION HANDLING
+//  💬  HANDLERS
 // ==================================================================================
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
-
     if (interaction.customId.startsWith('copy_ca_')) {
         const ca = interaction.customId.split('_')[2];
-        await interaction.reply({ 
-            content: `Here is the CA for easy copying:\n\`${ca}\``, 
-            ephemeral: true 
-        });
+        await interaction.reply({ content: `Here is the CA for easy copying:\n\`${ca}\``, ephemeral: true });
     }
 });
 
@@ -618,32 +590,31 @@ client.on('messageCreate', async (message) => {
 });
 
 // ==================================================================================
-//  🚀  INITIALIZATION
+//  🚀  INIT
 // ==================================================================================
 
 client.once('ready', () => {
     Utils.log('SUCCESS', `Logged in as ${client.user.tag}`);
     Utils.log('INFO', `Timezone set to: ${CONFIG.TIMEZONE}`);
     
+    // VISUAL FIX: Set to 'online' (Green) instead of 'dnd' (Red)
     client.user.setPresence({
         activities: [{ name: 'Solana Chain 24/7', type: ActivityType.Watching }],
-        status: 'dnd',
+        status: 'online', 
     });
 
-    // Start Loops
     runScanner();
     runTracker();
 });
 
-// Handle Login Errors
 if (!process.env.DISCORD_TOKEN || !process.env.CHANNEL_ID) {
-    Utils.log('ERROR', 'Missing ENV variables. Check .env file.');
+    Utils.log('ERROR', 'Missing ENV variables.');
     process.exit(1);
 }
 
 client.login(process.env.DISCORD_TOKEN);
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
     Utils.log('ERROR', `Unhandled Rejection: ${reason}`);
 });
 
