@@ -1,8 +1,9 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V6 - HYBRID CORE
-//  Logic: V4 Scan Algorithm (High Volume) + V5 Engine Labeling
+//  🟢 GREEN CHIP V7 - PURE V4 LOGIC RESTORED
+//  Logic: Raw V4 Filters (No extra safety checks, just speed)
+//  Target: $10k-$90k MC | High Vol | 12s Scan Speed
 //  Author: Gemini (AI) for GreenChip
-//  Updated: Restored V4 "Catch-All" Logic to ensure calls flow immediately.
+//  Updated: STRIPPED DOWN to match original V4 performance.
 // ==================================================================================
 
 require('dotenv').config();
@@ -22,25 +23,23 @@ const moment = require('moment-timezone');
 const cron = require('node-cron');
 
 // ==================================================================================
-//  ⚙️  CONFIGURATION
+//  ⚙️  CONFIGURATION (V4 SETTINGS)
 // ==================================================================================
 
 const CONFIG = {
-    BOT_NAME: "Green Chip V6",
-    VERSION: "6.0-HYBRID",
+    BOT_NAME: "Green Chip V7",
+    VERSION: "7.0-PURE-V4",
     TIMEZONE: "America/New_York", 
     
-    // --- V4 ORIGINAL FILTERS (The Money Makers) ---
+    // --- THE MONEY MAKER FILTERS ---
     FILTERS: {
-        MIN_MCAP: 10000,        
-        MAX_MCAP: 90000,        
-        MIN_LIQUIDITY: 1000,    
-        MIN_VOLUME_H1: 1000,    // Keep at 1k to catch organic pumps
-        MIN_AGE_MINUTES: 1,     
-        MAX_AGE_MINUTES: 60,    
-        MAX_PRICE_USD: 1.0,     
-        REQUIRE_SOCIALS: true,  
-        MIN_HYPE_SCORE: 10      
+        MIN_MCAP: 10000,        // $10k
+        MAX_MCAP: 90000,        // $90k
+        MIN_LIQUIDITY: 1000,    // Simple $1k floor
+        MIN_VOLUME_H1: 1000,    // $1k Volume
+        MIN_AGE_MINUTES: 0,     // 0 = Catch even brand new launches
+        MAX_AGE_MINUTES: 60,    // Under 1 hour
+        REQUIRE_SOCIALS: true   // Must have socials
     },
 
     TRACKING: {
@@ -51,10 +50,10 @@ const CONFIG = {
     },
 
     SYSTEM: {
-        SCAN_INTERVAL_MS: 12000,     // V4 Speed (12s)
-        TRACK_INTERVAL_MS: 10000,    // V4 Speed (10s)
-        RATE_LIMIT_DELAY: 1500,      
-        RETRY_TIMEOUT_MS: 15000      
+        SCAN_INTERVAL_MS: 12000,     // 12s (V4 Speed)
+        TRACK_INTERVAL_MS: 10000,    // 10s Tracking
+        RATE_LIMIT_DELAY: 2000,      // 2s delay between Discord msgs
+        RETRY_TIMEOUT_MS: 20000      // 20s cooldown on ban
     },
 
     URLS: {
@@ -162,7 +161,6 @@ class LeaderboardManager {
             address: callData.address,
             entryPrice: callData.entryPrice,
             highestGain: 0,
-            engine: callData.engineName || 'Standard',
             timestamp: Date.now()
         };
         this.dailyCalls.push(entry);
@@ -244,7 +242,7 @@ const client = new Client({
 });
 
 // ==================================================================================
-//  🕵️  HYBRID ANALYZER (V4 LOGIC + V5 LABELS)
+//  🕵️  COIN ANALYZER (RAW V4 LOGIC)
 // ==================================================================================
 
 class CoinAnalyzer {
@@ -253,10 +251,10 @@ class CoinAnalyzer {
         let score = 0;
         const vol = pair.volume?.h1 || 0;
         const liq = pair.liquidity?.usd || 1;
-        
         const ratio = vol / liq;
+        
         if (ratio > 0.5) score += 10;
-        if (ratio > 2.0) score += 20; 
+        if (ratio > 1.0) score += 20; 
         
         const socials = pair.info?.socials || [];
         score += (socials.length * 20); 
@@ -265,30 +263,20 @@ class CoinAnalyzer {
         return score;
     }
 
-    // This assigns the "Engine" label, but DOES NOT block the coin.
-    static getEngineLabel(pair) {
-        // 1. PumpFun
-        if (pair.dexId === 'pump') return { name: '💊 PumpFun Turbo', color: '#14F195', emoji: '💊' };
-        
-        // 2. Sniper (New & High Vol)
-        const ageMins = (Date.now() - pair.pairCreatedAt) / 60000;
-        if (ageMins < 10 && (pair.volume?.h1 > 3000)) return { name: '🎯 Sniper Watch', color: '#FF0000', emoji: '🎯' };
-        
-        // 3. Axiom/Trend
-        const hype = this.calculateHypeScore(pair);
-        if (hype > 40) return { name: '⚡ Axiom Trend', color: '#00D4FF', emoji: '⚡' };
-        
-        // 4. Standard
-        return { name: '🟢 Standard High Vol', color: '#FFFFFF', emoji: '🟢' };
+    static getStatusBadge(pair) {
+        const dexId = (pair.dexId || '').toLowerCase();
+        if (dexId === 'raydium') return { text: '🎓 RAYDIUM GRADUATED', emoji: '🌟', color: '#00D4FF' }; 
+        if (dexId === 'pump') return { text: '🚀 PUMP.FUN LIVE', emoji: '💊', color: '#14F195' }; 
+        return { text: '⚡ DEX LISTED', emoji: '⚡', color: '#FFFFFF' };
     }
 
     static validate(pair) {
-        // --- 1. BASIC CHECKS ---
+        // --- 1. BASIC INTEGRITY ---
         if (!pair?.baseToken?.address || !pair?.priceUsd) return { valid: false };
         if (pair.chainId !== 'solana') return { valid: false };
         if (STATE.isProcessed(pair.baseToken.address)) return { valid: false };
 
-        // --- 2. V4 ORIGINAL FILTERS (Broad & Effective) ---
+        // --- 2. V4 NUMERIC FILTERS (SIMPLE & FAST) ---
         const fdv = pair.fdv || pair.marketCap || 0;
         if (fdv < CONFIG.FILTERS.MIN_MCAP) return { valid: false };
         if (fdv > CONFIG.FILTERS.MAX_MCAP) return { valid: false };
@@ -307,14 +295,12 @@ class CoinAnalyzer {
         const socials = pair.info?.socials || [];
         if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) return { valid: false };
 
-        // --- 3. RETURN SUCCESS WITH ENGINE LABEL ---
+        // --- 3. RETURN METRICS ---
         const hype = this.calculateHypeScore(pair);
-        const engine = this.getEngineLabel(pair);
-
+        
         return { 
             valid: true, 
-            metrics: { hype, ageMins, fdv, liq, vol },
-            engine: engine
+            metrics: { hype, ageMins, fdv, liq, vol }
         };
     }
 }
@@ -323,11 +309,12 @@ class CoinAnalyzer {
 //  📢  MESSAGE BUILDER
 // ==================================================================================
 
-async function sendCallAlert(pair, metrics, engine) {
+async function sendCallAlert(pair, metrics) {
     const channel = client.channels.cache.get(process.env.CHANNEL_ID);
     if (!channel) return Utils.log('ERROR', 'Channel not found');
 
     const token = pair.baseToken;
+    const status = CoinAnalyzer.getStatusBadge(pair);
     const socials = pair.info?.socials || [];
     const linkMap = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ');
     const socialText = linkMap.length > 0 ? linkMap : "⚠️ *No social links*";
@@ -336,10 +323,11 @@ async function sendCallAlert(pair, metrics, engine) {
     const photonLink = `https://photon-sol.tinyastro.io/en/lp/${pair.pairAddress}`;
     
     const embed = new EmbedBuilder()
-        .setColor(engine.color)
-        .setTitle(`${engine.emoji} ${engine.name.toUpperCase()}: ${token.name} ($${token.symbol})`)
+        .setColor(status.color)
+        .setTitle(`${status.emoji} ${token.name} ($${token.symbol})`)
         .setURL(dexLink)
         .setDescription(`
+**${status.text}**
 ${socialText}
 
 **Metrics:** \`$${Utils.formatUSD(metrics.fdv)} MC\` • \`$${Utils.formatUSD(metrics.liq)} Liq\`
@@ -349,7 +337,7 @@ ${socialText}
 [**📈 DexScreener**](${dexLink}) • [**⚡ Photon**](${photonLink}) • [**🛒 GMGN**](${CONFIG.URLS.REFERRAL})
 `)
         .setThumbnail(pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png')
-        .setFooter({ text: `Green Chip V6 • ${Utils.getCurrentTime()}`, iconURL: client.user.displayAvatarURL() });
+        .setFooter({ text: `Green Chip V7 • ${Utils.getCurrentTime()}`, iconURL: client.user.displayAvatarURL() });
 
     const copyButton = new ButtonBuilder()
         .setCustomId(`copy_ca_${token.address}`)
@@ -371,7 +359,6 @@ ${socialText}
             entryPrice: parseFloat(pair.priceUsd),
             highestPrice: parseFloat(pair.priceUsd),
             highestGain: 0,
-            engineName: engine.name,
             milestonesCleared: [],
             channelId: process.env.CHANNEL_ID,
             messageId: msg.id,
@@ -417,7 +404,7 @@ async function sendGainUpdate(callData, currentPrice, pairData, type = 'GAIN') {
             .setColor(embedColor)
             .setTitle(`${emoji} ${title}`)
             .setDescription(description)
-            .setFooter({ text: `Green Chip V6 • ${callData.engineName} • ${Utils.getCurrentTime()}` });
+            .setFooter({ text: `Green Chip V7 • ${Utils.getCurrentTime()}` });
 
         await originalMsg.reply({ embeds: [embed] });
 
@@ -443,7 +430,7 @@ async function postLeaderboard(type) {
 }
 
 // ==================================================================================
-//  🔄  CORE LOOPS (V4 SPEED + V5 LOGIC)
+//  🔄  CORE LOOPS (V4 RESTORED)
 // ==================================================================================
 
 // 1. Scanner Loop
@@ -460,15 +447,15 @@ async function runScanner() {
 
         const pairs = res.data?.pairs || [];
 
-        // 🟢 HEARTBEAT LOG
-        Utils.log('INFO', `Scanning ${pairs.length} pairs (Hybrid Mode)...`);
+        // 🟢 HEARTBEAT LOG (V7)
+        Utils.log('INFO', `Scanning ${pairs.length} pairs (V4 Pure Mode)...`);
 
         for (const pair of pairs) {
             const check = CoinAnalyzer.validate(pair);
             
             if (check.valid) {
                 STATE.addProcessed(pair.baseToken.address);
-                await sendCallAlert(pair, check.metrics, check.engine);
+                await sendCallAlert(pair, check.metrics);
                 await Utils.sleep(CONFIG.SYSTEM.RATE_LIMIT_DELAY);
             }
         }
@@ -476,7 +463,7 @@ async function runScanner() {
 
     } catch (err) {
         if (err.response && err.response.status === 429) {
-            Utils.log('WARN', `⛔ RATE LIMITED (429). Retrying in 15s...`);
+            Utils.log('WARN', `⛔ RATE LIMITED (429). Retrying in 20s...`);
             setTimeout(runScanner, CONFIG.SYSTEM.RETRY_TIMEOUT_MS); 
             return;
         }
@@ -576,7 +563,7 @@ client.on('messageCreate', async (message) => {
     if (message.content === '!test') {
         const embed = new EmbedBuilder()
             .setColor('#00FF00')
-            .setTitle('🟢 GREEN CHIP V6 - HYBRID MODE ONLINE')
+            .setTitle('🟢 GREEN CHIP V7 - PURE V4 LOGIC ONLINE')
             .setDescription(`Timezone: ${CONFIG.TIMEZONE} | Time: ${Utils.getCurrentTime()}`)
             .addFields(
                 { name: '⏱️ Uptime', value: Utils.getAge(STATE.stats.startTime), inline: true },
@@ -593,7 +580,7 @@ client.on('messageCreate', async (message) => {
 
 client.once('ready', () => {
     Utils.log('SUCCESS', `Logged in as ${client.user.tag}`);
-    Utils.log('INFO', `Green Chip V6 Hybrid Logic Loaded.`);
+    Utils.log('INFO', `Green Chip V7 Pure V4 Logic Loaded.`);
     
     client.user.setPresence({
         activities: [{ name: 'Solana Chain 24/7', type: ActivityType.Watching }],
