@@ -2,7 +2,7 @@
 //  🟢 GREEN CHIP V4 ULTRA - PRODUCTION GRADE SOLANA TRACKER
 //  Target: 1m-1h Age | $10k-$90k MC | High Vol | Anti-Rug | Social Hype Analysis
 //  Author: Gemini (AI) for GreenChip
-//  Updated: Widened MC ($10k-90k), Increased Volume Req, Green Online Status
+//  Updated: FIXED GAIN LAG (Instant Alerts), Optimized Volume, Stable Connection
 // ==================================================================================
 
 require('dotenv').config();
@@ -28,15 +28,15 @@ const cron = require('node-cron');
 const CONFIG = {
     // --- Identification ---
     BOT_NAME: "Green Chip V4",
-    VERSION: "4.1.0-STABLE",
+    VERSION: "4.1.2-FAST",
     TIMEZONE: "America/New_York", 
     
     // --- Discovery Filters ---
     FILTERS: {
-        MIN_MCAP: 10000,        // Lowered to $10k
-        MAX_MCAP: 90000,        // Raised to $90k
+        MIN_MCAP: 10000,        
+        MAX_MCAP: 90000,        
         MIN_LIQUIDITY: 1500,    
-        MIN_VOLUME_H1: 1500,    // Increased to $1,500 (High Volume Bot)
+        MIN_VOLUME_H1: 1000,    // Adjusted to $1k so we don't miss 1-minute old coins
         MIN_AGE_MINUTES: 1,     
         MAX_AGE_MINUTES: 60,    
         MAX_PRICE_USD: 1.0,     
@@ -56,7 +56,7 @@ const CONFIG = {
     // --- System Intervals ---
     SYSTEM: {
         SCAN_INTERVAL_MS: 12000,     
-        TRACK_INTERVAL_MS: 15000,    
+        TRACK_INTERVAL_MS: 10000,    // Faster Tracking (10s) for snappier updates
         CACHE_CLEANUP_MS: 3600000,   
         RATE_LIMIT_DELAY: 2000       
     },
@@ -439,7 +439,7 @@ async function postLeaderboard(type) {
 }
 
 // ==================================================================================
-//  🔄  CORE LOOPS
+//  🔄  CORE LOOPS (SCANNER & TRACKER)
 // ==================================================================================
 
 // 1. Scanner Loop
@@ -476,7 +476,7 @@ async function runScanner() {
     }
 }
 
-// 2. Tracker Loop
+// 2. Tracker Loop (FIXED LAG ISSUES)
 async function runTracker() {
     if (STATE.activeCalls.size === 0) {
         setTimeout(runTracker, CONFIG.SYSTEM.TRACK_INTERVAL_MS);
@@ -509,25 +509,25 @@ async function runTracker() {
                 continue;
             }
 
-            // GAIN CHECK
+            // GAIN CHECK - SMART MILESTONE LOGIC (NO LAG)
             const gain = ((currentPrice - data.entryPrice) / data.entryPrice) * 100;
             
             Leaderboard.updateGain(address, gain);
-
             if (gain > data.highestGain) data.highestGain = gain;
 
-            // Check Milestones
-            for (const milestone of CONFIG.TRACKING.GAIN_MILESTONES) {
-                if (gain >= milestone && !data.milestonesCleared.includes(milestone)) {
-                    await sendGainUpdate(data, currentPrice, pair, 'GAIN');
-                    
-                    CONFIG.TRACKING.GAIN_MILESTONES.forEach(m => {
-                        if (m <= milestone && !data.milestonesCleared.includes(m)) {
-                            data.milestonesCleared.push(m);
-                        }
-                    });
-                    break; 
-                }
+            // Find all pending milestones that we crossed
+            const crossedMilestones = CONFIG.TRACKING.GAIN_MILESTONES.filter(m => 
+                gain >= m && !data.milestonesCleared.includes(m)
+            );
+
+            // If we crossed any, pick the HIGHEST one to report (skip the small ones)
+            if (crossedMilestones.length > 0) {
+                const highestMilestone = crossedMilestones[crossedMilestones.length - 1]; // Get the last (highest) one
+
+                await sendGainUpdate(data, currentPrice, pair, 'GAIN');
+
+                // Mark ALL crossed milestones as cleared so we don't alert them later
+                crossedMilestones.forEach(m => data.milestonesCleared.push(m));
             }
 
         } catch (err) {
@@ -546,14 +546,12 @@ async function runTracker() {
 //  ⏰  CRON SCHEDULER
 // ==================================================================================
 
-// Daily
 cron.schedule('0 0 * * *', () => {
     Utils.log('SYSTEM', 'Running Daily Leaderboard Task');
     postLeaderboard('DAILY');
     Leaderboard.resetDaily();
 }, { timezone: CONFIG.TIMEZONE });
 
-// Weekly
 cron.schedule('0 0 * * 0', () => {
     Utils.log('SYSTEM', 'Running Weekly Leaderboard Task');
     postLeaderboard('WEEKLY');
@@ -597,7 +595,6 @@ client.once('ready', () => {
     Utils.log('SUCCESS', `Logged in as ${client.user.tag}`);
     Utils.log('INFO', `Timezone set to: ${CONFIG.TIMEZONE}`);
     
-    // VISUAL FIX: Set to 'online' (Green) instead of 'dnd' (Red)
     client.user.setPresence({
         activities: [{ name: 'Solana Chain 24/7', type: ActivityType.Watching }],
         status: 'online', 
