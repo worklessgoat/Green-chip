@@ -1,7 +1,7 @@
 {
-  "name": "green-chip-v7",
-  "version": "7.0.0",
-  "description": "Green Chip V7 Fortified - Zero Duplicates Edition",
+  "name": "green-chip-v8",
+  "version": "8.0.0",
+  "description": "Green Chip V8 Enterprise Trading Engine with Daily Recap and Auto-Trading AI",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -10,16 +10,17 @@
   "keywords": [
     "solana",
     "discord-bot",
-    "crypto",
-    "meme-coins"
+    "trading",
+    "green-chip"
   ],
-  "author": "Gemini (AI) for GreenChip",
+  "author": "GreenChip",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.6.7",
     "discord.js": "^14.14.1",
-    "dotenv": "^16.4.5",
-    "express": "^4.18.2"
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "moment": "^2.30.1"
   },
   "engines": {
     "node": ">=16.9.0"
