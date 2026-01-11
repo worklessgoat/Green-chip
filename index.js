@@ -1,61 +1,58 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V10 - THE PERFECT BUILD
-//  Logic: V9 "Unchained" Speed + V5 "Engine Labels"
-//  Target: $5k-$90k MC | Socials Optional | Engine Badges Active
+//  🟢 GREEN CHIP V4.5 ULTRA - PRODUCTION GRADE SOLANA TRACKER
+//  Features: Live Tracking | Dip Recovery Analysis | Leaderboards | EST Timezone
 //  Author: Gemini (AI) for GreenChip
-//  Updated: Restored Engine Labels (Pump/Sniper/Axiom) without slowing down scan.
 // ==================================================================================
 
 require('dotenv').config();
-const { 
-    Client, 
-    GatewayIntentBits, 
-    EmbedBuilder, 
-    ActivityType, 
-    Partials, 
-    ButtonBuilder, 
-    ButtonStyle, 
-    ActionRowBuilder 
-} = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, Partials } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
 const moment = require('moment-timezone');
-const cron = require('node-cron');
+const fs = require('fs');
 
 // ==================================================================================
-//  ⚙️  CONFIGURATION
+//  ⚙️  CONFIGURATION MATRIX
 // ==================================================================================
 
 const CONFIG = {
-    BOT_NAME: "Green Chip V10",
-    VERSION: "10.0-PERFECT",
-    TIMEZONE: "America/New_York", 
+    // --- Identification ---
+    BOT_NAME: "Green Chip V4.5",
+    VERSION: "4.5.0-ULTRA",
+    TIMEZONE: "America/New_York", // United States Timezone
     
-    // --- FILTERS (UNCHAINED MODE) ---
+    // --- Discovery Filters ---
     FILTERS: {
-        MIN_MCAP: 5000,         // $5k
-        MAX_MCAP: 90000,        // $90k
-        MIN_LIQUIDITY: 500,     
+        MIN_MCAP: 20000,        
+        MAX_MCAP: 55000,        
+        MIN_LIQUIDITY: 1500,    
         MIN_VOLUME_H1: 500,     
-        MIN_AGE_MINUTES: 0,     
+        MIN_AGE_MINUTES: 1,     
         MAX_AGE_MINUTES: 60,    
-        REQUIRE_SOCIALS: false  // Socials are optional (won't block coins)
+        MAX_PRICE_USD: 1.0,     
+        REQUIRE_SOCIALS: true,  
+        MAX_SYM_LENGTH: 15,     
+        MIN_HYPE_SCORE: 10      
     },
 
+    // --- Tracking & Gains ---
     TRACKING: {
-        GAIN_MILESTONES: [40, 100, 200, 300, 400, 500, 800, 1000, 2000, 5000], 
-        STOP_LOSS_DROP: 0.85,        
-        RUG_LIQ_THRESHOLD: 100,      
-        MAX_TRACK_DURATION_HR: 24    
+        GAIN_TRIGGER_START: 30,       // Start alerting early
+        GAIN_STEP_MULTIPLIER: 1.5,    // Multiplier for standard steps
+        HARD_STOP_LOSS_PERCENT: 0.85, // 85% Drop from ATH = STOP
+        RUG_LIQ_THRESHOLD: 300,       // $300 Liq = Rug
+        MAX_TRACK_DURATION_HR: 48     // Track for 2 days maximum
     },
 
+    // --- System Intervals ---
     SYSTEM: {
-        SCAN_INTERVAL_MS: 12000,     // 12s Fast Scan
-        TRACK_INTERVAL_MS: 10000,    
-        RATE_LIMIT_DELAY: 2000,      
-        RETRY_TIMEOUT_MS: 20000      
+        SCAN_INTERVAL_MS: 12000,    
+        TRACK_INTERVAL_MS: 5000,     // Faster tracking updates
+        LEADERBOARD_CHECK_MS: 60000, // Check for reset every minute
+        RATE_LIMIT_DELAY: 2000       
     },
 
+    // --- Links ---
     URLS: {
         REFERRAL: "https://gmgn.ai/r/Greenchip",
         DEX_API: "https://api.dexscreener.com/latest/dex/search?q=solana",
@@ -70,12 +67,15 @@ const CONFIG = {
 const Utils = {
     sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
     
+    // US Timezone Date
+    getNow: () => moment().tz(CONFIG.TIMEZONE),
+
     formatUSD: (num) => {
-        if (!num || isNaN(num)) return '$0';
+        if (!num || isNaN(num)) return '$0.00';
         if (num >= 1e9) return '$' + (num / 1e9).toFixed(2) + 'B';
         if (num >= 1e6) return '$' + (num / 1e6).toFixed(2) + 'M';
-        if (num >= 1e3) return '$' + (num / 1e3).toFixed(0) + 'K'; 
-        return '$' + num.toFixed(0);
+        if (num >= 1e3) return '$' + (num / 1e3).toFixed(2) + 'K';
+        return '$' + num.toFixed(2);
     },
 
     formatPrice: (num) => {
@@ -93,16 +93,121 @@ const Utils = {
         return `${hours}h ${mins % 60}m ago`;
     },
 
-    getCurrentTime: () => {
-        return moment().tz(CONFIG.TIMEZONE).format('h:mm:ss A');
-    },
-
     log: (type, message) => {
-        const time = Utils.getCurrentTime();
-        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', SYSTEM: '⚙️' };
+        const time = Utils.getNow().format('HH:mm:ss');
+        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', LEADERBOARD: '🏆' };
         console.log(`[${time}] ${icons[type] || ''} ${type}: ${message}`);
     }
 };
+
+// ==================================================================================
+//  🏆  LEADERBOARD SYSTEM (PERSISTENT)
+// ==================================================================================
+
+const DB_FILE = './leaderboard.json';
+
+class LeaderboardManager {
+    constructor() {
+        this.data = {
+            daily: [],
+            weekly: [],
+            lastResetDaily: Utils.getNow().format('YYYY-MM-DD'),
+            lastResetWeekly: Utils.getNow().isoWeek()
+        };
+        this.load();
+    }
+
+    load() {
+        if (fs.existsSync(DB_FILE)) {
+            try {
+                this.data = JSON.parse(fs.readFileSync(DB_FILE));
+            } catch (e) { Utils.log('ERROR', 'Failed to load leaderboard DB'); }
+        }
+    }
+
+    save() {
+        fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2));
+    }
+
+    updateEntry(tokenData, gainPercent) {
+        // Prepare entry object
+        const entry = {
+            symbol: tokenData.symbol,
+            address: tokenData.address,
+            gain: parseFloat(gainPercent.toFixed(2)),
+            time: Utils.getNow().format('HH:mm A')
+        };
+
+        // Update Daily
+        this.updateList('daily', entry);
+        // Update Weekly
+        this.updateList('weekly', entry);
+        this.save();
+    }
+
+    updateList(type, entry) {
+        const list = this.data[type];
+        const existingIndex = list.findIndex(i => i.address === entry.address);
+        
+        if (existingIndex > -1) {
+            // Only update if gain is higher
+            if (entry.gain > list[existingIndex].gain) {
+                list[existingIndex] = entry;
+            }
+        } else {
+            list.push(entry);
+        }
+        
+        // Sort by gain desc and keep top 10
+        this.data[type] = list.sort((a, b) => b.gain - a.gain).slice(0, 10);
+    }
+
+    async checkResets(client) {
+        const now = Utils.getNow();
+        const todayDate = now.format('YYYY-MM-DD');
+        const currentWeek = now.isoWeek();
+
+        // Daily Reset (12:00 AM)
+        if (this.data.lastResetDaily !== todayDate) {
+            await this.postLeaderboard(client, 'DAILY');
+            this.data.daily = []; // Wipe
+            this.data.lastResetDaily = todayDate;
+            this.save();
+            Utils.log('LEADERBOARD', 'Daily Leaderboard Reset');
+        }
+
+        // Weekly Reset (Monday 12:00 AM)
+        if (this.data.lastResetWeekly !== currentWeek) {
+            await this.postLeaderboard(client, 'WEEKLY');
+            this.data.weekly = []; // Wipe
+            this.data.lastResetWeekly = currentWeek;
+            this.save();
+            Utils.log('LEADERBOARD', 'Weekly Leaderboard Reset');
+        }
+    }
+
+    async postLeaderboard(client, type) {
+        const channel = client.channels.cache.get(process.env.CHANNEL_ID);
+        if (!channel) return;
+
+        const list = this.data[type.toLowerCase()];
+        if (list.length === 0) return;
+
+        let desc = list.map((e, i) => 
+            `**#${i+1} ${e.symbol}** • +${e.gain}%`
+        ).join('\n');
+
+        const embed = new EmbedBuilder()
+            .setColor('#FFD700')
+            .setTitle(`🏆 ${type} TOP PERFORMERS`)
+            .setDescription(desc || "No huge gains recorded yet.")
+            .setFooter({ text: `Reset time: ${Utils.getNow().format('MM/DD HH:mm z')}` });
+
+        await channel.send({ embeds: [embed] });
+    }
+}
+
+const LEADERBOARD = new LeaderboardManager();
 
 // ==================================================================================
 //  🧠  STATE MANAGEMENT
@@ -111,22 +216,19 @@ const Utils = {
 class StateManager {
     constructor() {
         this.activeCalls = new Map(); 
-        this.processedHistory = new Set(); 
+        this.processedHistory = new Set();
         this.stats = {
             callsToday: 0,
             startTime: Date.now(),
-            apiRequests: 0,
             ruggedDetected: 0
         };
     }
 
-    isProcessed(address) {
-        return this.processedHistory.has(address);
-    }
+    isProcessed(address) { return this.processedHistory.has(address); }
 
     addProcessed(address) {
         this.processedHistory.add(address);
-        if (this.processedHistory.size > 8000) { 
+        if (this.processedHistory.size > 5000) {
             const it = this.processedHistory.values();
             this.processedHistory.delete(it.next().value);
         }
@@ -135,7 +237,6 @@ class StateManager {
     addActiveCall(data) {
         this.activeCalls.set(data.address, data);
         this.stats.callsToday++;
-        Leaderboard.recordCall(data); 
     }
 
     removeActiveCall(address) {
@@ -146,148 +247,51 @@ class StateManager {
 const STATE = new StateManager();
 
 // ==================================================================================
-//  🏆  LEADERBOARD SYSTEM
-// ==================================================================================
-
-class LeaderboardManager {
-    constructor() {
-        this.dailyCalls = [];
-        this.weeklyCalls = [];
-    }
-
-    recordCall(callData) {
-        const entry = {
-            symbol: callData.symbol,
-            address: callData.address,
-            entryPrice: callData.entryPrice,
-            highestGain: 0,
-            engine: callData.engineName, // Saving Engine Name
-            timestamp: Date.now()
-        };
-        this.dailyCalls.push(entry);
-        this.weeklyCalls.push(entry);
-    }
-
-    updateGain(address, gain) {
-        const dailyItem = this.dailyCalls.find(i => i.address === address);
-        if (dailyItem && gain > dailyItem.highestGain) dailyItem.highestGain = gain;
-
-        const weeklyItem = this.weeklyCalls.find(i => i.address === address);
-        if (weeklyItem && gain > weeklyItem.highestGain) weeklyItem.highestGain = gain;
-    }
-
-    generateLeaderboard(type) {
-        const list = type === 'DAILY' ? this.dailyCalls : this.weeklyCalls;
-        const sorted = list.sort((a, b) => b.highestGain - a.highestGain).slice(0, 10); 
-
-        if (sorted.length === 0) return "No calls recorded yet.";
-
-        let description = "";
-        sorted.forEach((item, index) => {
-            let medal = "🔹";
-            if (index === 0) medal = "🥇";
-            if (index === 1) medal = "🥈";
-            if (index === 2) medal = "🥉";
-            
-            description += `${medal} **$${item.symbol}** (${item.engine}) • +${item.highestGain.toFixed(0)}%\n`;
-        });
-        
-        return description;
-    }
-
-    resetDaily() {
-        this.dailyCalls = [];
-        Utils.log('INFO', 'Daily Leaderboard Reset');
-    }
-
-    resetWeekly() {
-        this.weeklyCalls = [];
-        Utils.log('INFO', 'Weekly Leaderboard Reset');
-    }
-}
-
-const Leaderboard = new LeaderboardManager();
-
-// ==================================================================================
-//  🌐  EXPRESS SERVER
+//  🌐  SERVER
 // ==================================================================================
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get('/', (req, res) => {
-    res.status(200).json({
-        status: 'Operational',
-        uptime: Utils.getAge(STATE.stats.startTime),
-        active_tracks: STATE.activeCalls.size,
-        history_db: STATE.processedHistory.size,
-        calls_today: STATE.stats.callsToday
-    });
-});
-
-app.listen(PORT, () => {
-    Utils.log('SYSTEM', `Web server running on port ${PORT}`);
-});
+app.get('/', (req, res) => res.status(200).json({ status: 'OK', calls: STATE.stats.callsToday }));
+app.listen(process.env.PORT || 3000);
 
 // ==================================================================================
 //  🤖  DISCORD CLIENT
 // ==================================================================================
 
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ],
-    partials: [Partials.Channel, Partials.Message]
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
 // ==================================================================================
-//  🕵️  COIN ANALYZER (FAST + LABELS)
+//  🕵️  COIN ANALYZER
 // ==================================================================================
 
 class CoinAnalyzer {
-    
     static calculateHypeScore(pair) {
         let score = 0;
         const vol = pair.volume?.h1 || 0;
         const liq = pair.liquidity?.usd || 1;
         const ratio = vol / liq;
-        
         if (ratio > 0.5) score += 10;
-        if (ratio > 1.0) score += 20; 
-        
+        if (ratio > 1.0) score += 20;
+        if (ratio > 5.0) score += 40; 
         const socials = pair.info?.socials || [];
-        score += (socials.length * 20); 
-        
-        if (pair.info?.imageUrl) score += 10;
+        score += (socials.length * 15); 
         return score;
     }
 
-    // 🟢 NEW: ENGINE LABELER (This just NAMING, not filtering)
-    static identifyEngine(pair) {
-        // 1. PumpFun
-        if (pair.dexId === 'pump') return { name: '💊 PumpFun', color: '#14F195', emoji: '💊' };
-        
-        // 2. Sniper (Super young + High Vol)
-        const ageMins = (Date.now() - pair.pairCreatedAt) / 60000;
-        if (ageMins < 10 && (pair.volume?.h1 > 2000)) return { name: '🎯 Sniper', color: '#FF0000', emoji: '🎯' };
-        
-        // 3. Axiom (Socials + High Hype)
-        const hype = this.calculateHypeScore(pair);
-        if (hype > 40 && pair.info?.socials?.length > 0) return { name: '⚡ Axiom Trend', color: '#00D4FF', emoji: '⚡' };
-        
-        // 4. Standard
-        return { name: '🟢 Standard', color: '#FFFFFF', emoji: '🟢' };
+    static getStatusBadge(pair) {
+        const dexId = (pair.dexId || '').toLowerCase();
+        if (dexId === 'raydium') return { text: '🎓 RAYDIUM GRADUATED', emoji: '🌟', color: '#00D4FF' }; 
+        if (dexId === 'pump') return { text: '🚀 PUMP.FUN LIVE', emoji: '💊', color: '#14F195' }; 
+        return { text: '⚡ DEX LISTED', emoji: '⚡', color: '#FFFFFF' };
     }
 
     static validate(pair) {
-        // --- 1. BASIC INTEGRITY ---
         if (!pair?.baseToken?.address || !pair?.priceUsd) return { valid: false };
         if (pair.chainId !== 'solana') return { valid: false };
         if (STATE.isProcessed(pair.baseToken.address)) return { valid: false };
 
-        // --- 2. DEGEN FILTERS (LOOSE) ---
         const fdv = pair.fdv || pair.marketCap || 0;
         if (fdv < CONFIG.FILTERS.MIN_MCAP) return { valid: false };
         if (fdv > CONFIG.FILTERS.MAX_MCAP) return { valid: false };
@@ -303,90 +307,85 @@ class CoinAnalyzer {
         if (liq < CONFIG.FILTERS.MIN_LIQUIDITY) return { valid: false };
         if (vol < CONFIG.FILTERS.MIN_VOLUME_H1) return { valid: false };
 
-        // SOCIALS CHECK (Respects REQUIRE_SOCIALS config)
         const socials = pair.info?.socials || [];
         if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) return { valid: false };
+        if (pair.baseToken.symbol.length > CONFIG.FILTERS.MAX_SYM_LENGTH) return { valid: false };
 
         const hype = this.calculateHypeScore(pair);
-        const engine = this.identifyEngine(pair); // Get the badge
-        
-        return { 
-            valid: true, 
-            metrics: { hype, ageMins, fdv, liq, vol },
-            engine: engine
-        };
+        if (hype < CONFIG.FILTERS.MIN_HYPE_SCORE) return { valid: false };
+
+        return { valid: true, metrics: { hype, ageMins, fdv, liq, vol } };
     }
 }
 
 // ==================================================================================
-//  📢  MESSAGE BUILDER
+//  📢  MESSAGE BUILDER (CLEANER & WITH COPY BUTTON)
 // ==================================================================================
 
-async function sendCallAlert(pair, metrics, engine) {
+async function sendCallAlert(pair, metrics) {
     const channel = client.channels.cache.get(process.env.CHANNEL_ID);
-    if (!channel) return Utils.log('ERROR', 'Channel not found');
+    if (!channel) return;
 
     const token = pair.baseToken;
+    const status = CoinAnalyzer.getStatusBadge(pair);
     const socials = pair.info?.socials || [];
-    const linkMap = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ');
-    const socialText = linkMap.length > 0 ? linkMap : "⚠️ *No social links*";
+    
+    // Condensed Socials
+    const linkMap = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' | ');
 
     const dexLink = `https://dexscreener.com/solana/${pair.pairAddress}`;
     const photonLink = `https://photon-sol.tinyastro.io/en/lp/${pair.pairAddress}`;
+    const bullxLink = `https://bullx.io/terminal?chainId=1399811149&address=${token.address}`;
     
-    // Uses Engine Color & Name
+    // CA BUTTON (Using Code Block)
+    const caBlock = `\`${token.address}\``;
+
     const embed = new EmbedBuilder()
-        .setColor(engine.color)
-        .setTitle(`${engine.emoji} ${engine.name.toUpperCase()}: ${token.name} ($${token.symbol})`)
+        .setColor(status.color)
+        .setTitle(`${status.emoji} NEW: ${token.name} ($${token.symbol})`)
         .setURL(dexLink)
         .setDescription(`
-${socialText}
+${status.text}
+${linkMap}
 
-**Metrics:** \`$${Utils.formatUSD(metrics.fdv)} MC\` • \`$${Utils.formatUSD(metrics.liq)} Liq\`
-**Volume:** \`$${Utils.formatUSD(metrics.vol)} (1h)\` • **Price:** \`${Utils.formatPrice(parseFloat(pair.priceUsd))}\`
-**Age:** ${Utils.getAge(pair.pairCreatedAt)} • **Hype:** \`${metrics.hype}/100\`
+**MC:** \`${Utils.formatUSD(metrics.fdv)}\` • **Liq:** \`${Utils.formatUSD(metrics.liq)}\`
+**Vol:** \`${Utils.formatUSD(metrics.vol)}\` • **Age:** \`${metrics.ageMins.toFixed(0)}m\`
+**Score:** \`${metrics.hype}/100\`
 
-[**📈 DexScreener**](${dexLink}) • [**⚡ Photon**](${photonLink}) • [**🛒 GMGN**](${CONFIG.URLS.REFERRAL})
+**CA (Copy):**
+${caBlock}
+
+[**GMGN**](${CONFIG.URLS.REFERRAL}) • [**Photon**](${photonLink}) • [**BullX**](${bullxLink})
 `)
         .setThumbnail(pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png')
-        .setFooter({ text: `Green Chip V10 • ${Utils.getCurrentTime()}`, iconURL: client.user.displayAvatarURL() });
-
-    const copyButton = new ButtonBuilder()
-        .setCustomId(`copy_ca_${token.address}`)
-        .setLabel(`📝 Copy CA`) 
-        .setStyle(ButtonStyle.Secondary);
-
-    const row = new ActionRowBuilder().addComponents(copyButton);
+        .setFooter({ text: `Green Chip Ultra • ${Utils.getNow().format('hh:mm A z')}` });
 
     try {
-        const msg = await channel.send({ 
-            content: `\`${token.address}\``, 
-            embeds: [embed],
-            components: [row] 
-        });
+        const msg = await channel.send({ embeds: [embed] });
         
         STATE.addActiveCall({
             address: token.address,
             symbol: token.symbol,
             entryPrice: parseFloat(pair.priceUsd),
-            entryMC: metrics.fdv, 
-            highestPrice: parseFloat(pair.priceUsd),
-            highestGain: 0,
-            engineName: engine.name,
-            milestonesCleared: [],
+            entryMc: metrics.fdv,
+            
+            // TRACKING HIGHS & LOWS
+            athPrice: parseFloat(pair.priceUsd), // All Time High Price
+            athMc: metrics.fdv,                  // All Time High MC
+            
+            // Dip Tracking
+            isDipping: false,
+            dipLowMc: metrics.fdv,
+
+            lastAlertGain: 0,
             channelId: process.env.CHANNEL_ID,
             messageId: msg.id,
-            startTime: Date.now(),
-            lastUpdate: Date.now()
+            startTime: Date.now()
         });
-
-        Utils.log('SUCCESS', `Sent Call: ${token.name}`);
-    } catch (err) {
-        Utils.log('ERROR', `Failed to send embed: ${err.message}`);
-    }
+    } catch (err) { Utils.log('ERROR', err.message); }
 }
 
-async function sendGainUpdate(callData, currentPrice, pairData, type = 'GAIN') {
+async function sendUpdate(callData, currentPrice, pairData, type, customMsg = null) {
     const channel = client.channels.cache.get(callData.channelId);
     if (!channel) return;
 
@@ -395,104 +394,72 @@ async function sendGainUpdate(callData, currentPrice, pairData, type = 'GAIN') {
         if (!originalMsg) return;
 
         const gainPct = ((currentPrice - callData.entryPrice) / callData.entryPrice) * 100;
-        const currentMC = pairData.fdv || pairData.marketCap || 0;
-        
+        const curMc = pairData.fdv || pairData.marketCap || 0;
+
         let embedColor = '#00FF00'; 
-        let emoji = '🚀';
-        let title = `+${gainPct.toFixed(2)}% GAINED`;
+        let title = '';
+        let description = '';
 
-        if (type === 'RUG') {
-            embedColor = '#FF0000'; 
-            emoji = '🚨';
-            title = 'STOP LOSS / RUG ALERT';
-        } else if (gainPct > 100) {
-            embedColor = '#FFD700'; 
-            emoji = '🌕';
-        } else if (gainPct > 500) {
-            embedColor = '#FF00FF';
-            emoji = '💎';
+        if (type === 'RUG' || type === 'STOP_LOSS') {
+            embedColor = '#FF0000';
+            title = type === 'RUG' ? '🚨 RUG PULLED' : '🛑 STOP LOSS TRIGGERED';
+            description = `**${callData.symbol} Stopped.**\n${customMsg || 'Dropped below safety limits.'}`;
+        } 
+        else if (type === 'RECOVERY') {
+            // "Goes down for a mean time and goes back up"
+            embedColor = '#00FFFF'; // Cyan for recovery
+            title = `📈 MEGA RECOVERY: +${gainPct.toFixed(0)}%`;
+            description = `${customMsg}\nCurrent: \`${Utils.formatUSD(curMc)}\``;
         }
-
-        const description = type === 'RUG' 
-            ? `**⚠️ CRITICAL DROP**\nDropped >85% or Liq Pulled.\nStopped Tracking.`
-            : `
-**${emoji} ${gainPct.toFixed(0)}% Gained**
-from \`${Utils.formatUSD(callData.entryMC)} MC\` ➡️ \`${Utils.formatUSD(currentMC)} MC\`
-
-Current Price: \`${Utils.formatPrice(currentPrice)}\`
-`;
+        else {
+            // Standard "Goes Up"
+            if (gainPct > 100) embedColor = '#FFD700';
+            if (gainPct > 500) embedColor = '#FF00FF';
+            title = `🚀 GOES UP: ${gainPct.toFixed(0)}% gained`;
+            description = `**${callData.symbol} is mooning!**\nMC: \`${Utils.formatUSD(curMc)}\`\nPrice: \`${Utils.formatPrice(currentPrice)}\``;
+        }
 
         const embed = new EmbedBuilder()
             .setColor(embedColor)
-            .setTitle(`${emoji} ${title}`)
+            .setTitle(title)
             .setDescription(description)
-            .setFooter({ text: `Green Chip V10 • ${callData.engineName} • ${Utils.getCurrentTime()}` });
+            .setTimestamp();
 
         await originalMsg.reply({ embeds: [embed] });
 
-    } catch (err) {
-        Utils.log('ERROR', `Failed to send update: ${err.message}`);
-    }
-}
-
-async function postLeaderboard(type) {
-    const channel = client.channels.cache.get(process.env.CHANNEL_ID);
-    if (!channel) return;
-
-    const title = type === 'DAILY' ? '📅 DAILY TOP PERFORMERS' : '🏆 WEEKLY HALL OF FAME';
-    const content = Leaderboard.generateLeaderboard(type);
-
-    const embed = new EmbedBuilder()
-        .setColor('#FF00FF')
-        .setTitle(title)
-        .setDescription(content)
-        .setFooter({ text: `Leaderboard updated ${Utils.getCurrentTime()}` });
-
-    await channel.send({ embeds: [embed] });
+    } catch (err) { Utils.log('ERROR', err.message); }
 }
 
 // ==================================================================================
-//  🔄  CORE LOOPS (V9 UNCHAINED SPEED)
+//  🔄  CORE LOOPS (SCANNER & INTELLIGENT TRACKER)
 // ==================================================================================
 
-// 1. Scanner Loop
 async function runScanner() {
     try {
-        STATE.stats.apiRequests++;
         const res = await axios.get(CONFIG.URLS.DEX_API, {
-            timeout: 8000,
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'application/json'
-            }
+            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
-
         const pairs = res.data?.pairs || [];
-        Utils.log('INFO', `Scanning ${pairs.length} pairs (V10 Speed)...`);
 
         for (const pair of pairs) {
             const check = CoinAnalyzer.validate(pair);
             if (check.valid) {
                 STATE.addProcessed(pair.baseToken.address);
-                await sendCallAlert(pair, check.metrics, check.engine);
-                await Utils.sleep(CONFIG.SYSTEM.RATE_LIMIT_DELAY);
+                await sendCallAlert(pair, check.metrics);
+                await Utils.sleep(CONFIG.SYSTEM.RATE_LIMIT_DELAY); 
             }
         }
-        setTimeout(runScanner, CONFIG.SYSTEM.SCAN_INTERVAL_MS);
-
-    } catch (err) {
-        if (err.response && err.response.status === 429) {
-            Utils.log('WARN', `⛔ RATE LIMITED (429). Retrying in 20s...`);
-            setTimeout(runScanner, CONFIG.SYSTEM.RETRY_TIMEOUT_MS); 
-            return;
-        }
-        Utils.log('WARN', `Scanner API Error: ${err.message}`);
-        setTimeout(runScanner, 20000);
+    } catch (err) { 
+        if (err.response?.status === 429) await Utils.sleep(60000);
     }
+    setTimeout(runScanner, CONFIG.SYSTEM.SCAN_INTERVAL_MS);
 }
 
-// 2. Tracker Loop
+// INTELLIGENT TRACKER (Fixed Logic)
 async function runTracker() {
+    // Check Leaderboard Reset (12AM)
+    await LEADERBOARD.checkResets(client);
+
     if (STATE.activeCalls.size === 0) {
         setTimeout(runTracker, CONFIG.SYSTEM.TRACK_INTERVAL_MS);
         return;
@@ -500,127 +467,97 @@ async function runTracker() {
 
     for (const [address, data] of STATE.activeCalls) {
         try {
+            // Time Limit Check
             if (Date.now() - data.startTime > (CONFIG.TRACKING.MAX_TRACK_DURATION_HR * 3600000)) {
                 STATE.removeActiveCall(address);
                 continue;
             }
 
             const res = await axios.get(`${CONFIG.URLS.TOKEN_API}${address}`, { 
-                timeout: 3000,
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }
+                headers: { 'User-Agent': 'Mozilla/5.0' } 
             });
-            const pair = res.data?.pairs?.[0]; 
-
+            const pair = res.data?.pairs?.[0];
             if (!pair) continue;
 
-            const currentPrice = parseFloat(pair.priceUsd);
+            const curPrice = parseFloat(pair.priceUsd);
+            const curMc = pair.fdv || pair.marketCap || 0;
             const liq = pair.liquidity?.usd || 0;
+            const gain = ((curPrice - data.entryPrice) / data.entryPrice) * 100;
 
-            if (currentPrice < (data.entryPrice * (1 - CONFIG.TRACKING.STOP_LOSS_DROP)) || liq < CONFIG.TRACKING.RUG_LIQ_THRESHOLD) {
-                await sendGainUpdate(data, currentPrice, pair, 'RUG');
+            // 1. UPDATE ATH (All Time High)
+            if (curPrice > data.athPrice) {
+                data.athPrice = curPrice;
+                data.athMc = curMc;
+                data.isDipping = false; // We are at new highs, not dipping
+            }
+
+            // 2. CHECK RUG
+            if (liq < CONFIG.TRACKING.RUG_LIQ_THRESHOLD) {
+                await sendUpdate(data, curPrice, pair, 'RUG');
                 STATE.removeActiveCall(address);
-                STATE.stats.ruggedDetected++;
                 continue;
             }
 
-            const gain = ((currentPrice - data.entryPrice) / data.entryPrice) * 100;
+            // 3. CHECK STOP LOSS (85% DROP FROM ATH)
+            // "Then when it went down to 85% negative... its time to stop"
+            const dropFromAth = (data.athPrice - curPrice) / data.athPrice;
+            if (dropFromAth >= CONFIG.TRACKING.HARD_STOP_LOSS_PERCENT) {
+                await sendUpdate(data, curPrice, pair, 'STOP_LOSS', `Dropped 85% from ATH (${Utils.formatUSD(data.athMc)})`);
+                STATE.removeActiveCall(address);
+                continue;
+            }
+
+            // 4. DIP DETECTION
+            // If we are significantly below ATH, we are dipping. Track the bottom of the dip.
+            if (dropFromAth > 0.30) { // 30% down from ATH considered a "dip"
+                data.isDipping = true;
+                if (!data.dipLowMc || curMc < data.dipLowMc) {
+                    data.dipLowMc = curMc; // Track the lowest point of this dip
+                }
+            }
+
+            // 5. GAIN ALERTS LOGIC
+            // A. RECOVERY PUMP (The "3588% from X to Y" logic)
+            // If it was dipping, and now it broke the old ATH (or is very close), trigger recovery msg
+            if (data.isDipping && curPrice >= data.athPrice) {
+                 await sendUpdate(data, curPrice, pair, 'RECOVERY', 
+                    `**${gain.toFixed(0)}% gained** from ${Utils.formatUSD(data.dipLowMc)} market cap to ${Utils.formatUSD(curMc)} market cap`
+                );
+                data.isDipping = false; // Reset dip status
+                data.dipLowMc = null;
+                data.lastAlertGain = gain; // Prevent double alerts
+                LEADERBOARD.updateEntry(data, gain);
+            }
             
-            Leaderboard.updateGain(address, gain);
-            if (gain > data.highestGain) data.highestGain = gain;
-
-            const crossedMilestones = CONFIG.TRACKING.GAIN_MILESTONES.filter(m => 
-                gain >= m && !data.milestonesCleared.includes(m)
-            );
-
-            if (crossedMilestones.length > 0) {
-                await sendGainUpdate(data, currentPrice, pair, 'GAIN');
-                crossedMilestones.forEach(m => data.milestonesCleared.push(m));
+            // B. STANDARD GOES UP (Only if hitting new highs)
+            // "Don't skip until it goes to the highest"
+            else if (gain > data.lastAlertGain + 20) { // Minimum 20% step to avoid spam
+                // Only alert if we are near ATH (not bouncing around bottom)
+                if (curPrice >= data.athPrice * 0.95) {
+                    await sendUpdate(data, curPrice, pair, 'GAIN');
+                    data.lastAlertGain = gain;
+                    LEADERBOARD.updateEntry(data, gain);
+                }
             }
 
         } catch (err) {
-             if (err.response && err.response.status === 429) {
-                break; 
-            }
+            // Silent error handling for API glitches
         }
-        await Utils.sleep(500); 
+        await Utils.sleep(200); // Fast pacing
     }
 
     setTimeout(runTracker, CONFIG.SYSTEM.TRACK_INTERVAL_MS);
 }
 
 // ==================================================================================
-//  ⏰  CRON SCHEDULER
-// ==================================================================================
-
-cron.schedule('0 0 * * *', () => {
-    Utils.log('SYSTEM', 'Running Daily Leaderboard Task');
-    postLeaderboard('DAILY');
-    Leaderboard.resetDaily();
-}, { timezone: CONFIG.TIMEZONE });
-
-cron.schedule('0 0 * * 0', () => {
-    Utils.log('SYSTEM', 'Running Weekly Leaderboard Task');
-    postLeaderboard('WEEKLY');
-    Leaderboard.resetWeekly();
-}, { timezone: CONFIG.TIMEZONE });
-
-// ==================================================================================
-//  💬  HANDLERS
-// ==================================================================================
-
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isButton()) return;
-    if (interaction.customId.startsWith('copy_ca_')) {
-        const ca = interaction.customId.split('_')[2];
-        await interaction.reply({ content: `Here is the CA for easy copying:\n\`${ca}\``, ephemeral: true });
-    }
-});
-
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-
-    if (message.content === '!test') {
-        const embed = new EmbedBuilder()
-            .setColor('#00FF00')
-            .setTitle('🟢 GREEN CHIP V10 - PERFECT BUILD ONLINE')
-            .setDescription(`Timezone: ${CONFIG.TIMEZONE} | Time: ${Utils.getCurrentTime()}`)
-            .addFields(
-                { name: '⏱️ Uptime', value: Utils.getAge(STATE.stats.startTime), inline: true },
-                { name: '📡 Active Tracks', value: `${STATE.activeCalls.size}`, inline: true },
-                { name: '🎯 Calls Today', value: `${STATE.stats.callsToday}`, inline: true }
-            );
-        await message.reply({ embeds: [embed] });
-    }
-});
-
-// ==================================================================================
-//  🚀  INIT
+//  🚀  INITIALIZATION
 // ==================================================================================
 
 client.once('ready', () => {
-    Utils.log('SUCCESS', `Logged in as ${client.user.tag}`);
-    Utils.log('INFO', `Green Chip V10 Loaded.`);
-    
-    client.user.setPresence({
-        activities: [{ name: 'Solana Chain 24/7', type: ActivityType.Watching }],
-        status: 'online', 
-    });
-
+    Utils.log('SUCCESS', `System Online. Timezone: ${CONFIG.TIMEZONE}`);
     runScanner();
     runTracker();
 });
 
-if (!process.env.DISCORD_TOKEN || !process.env.CHANNEL_ID) {
-    Utils.log('ERROR', 'Missing ENV variables.');
-    process.exit(1);
-}
-
+if (!process.env.DISCORD_TOKEN) { process.exit(1); }
 client.login(process.env.DISCORD_TOKEN);
-
-process.on('unhandledRejection', (reason) => {
-    Utils.log('ERROR', `Unhandled Rejection: ${reason}`);
-});
-
-process.on('uncaughtException', (err) => {
-    Utils.log('ERROR', `Uncaught Exception: ${err.message}`);
-});
