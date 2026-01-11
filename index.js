@@ -1,8 +1,8 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V5 TURBO - HIGH SPEED SOLANA TRACKER
-//  Engines: PumpFun | Axiom Pulse | Sniper Watch | Standard Safe
+//  🟢 GREEN CHIP V6 - HYBRID CORE
+//  Logic: V4 Scan Algorithm (High Volume) + V5 Engine Labeling
 //  Author: Gemini (AI) for GreenChip
-//  Updated: Restored V4 Speed Settings (12s Intervals) for Max Profitability
+//  Updated: Restored V4 "Catch-All" Logic to ensure calls flow immediately.
 // ==================================================================================
 
 require('dotenv').config();
@@ -22,22 +22,27 @@ const moment = require('moment-timezone');
 const cron = require('node-cron');
 
 // ==================================================================================
-//  ⚙️  GLOBAL CONFIGURATION
+//  ⚙️  CONFIGURATION
 // ==================================================================================
 
 const CONFIG = {
-    BOT_NAME: "Green Chip V5 Turbo",
-    VERSION: "5.1.0-TURBO",
+    BOT_NAME: "Green Chip V6",
+    VERSION: "6.0-HYBRID",
     TIMEZONE: "America/New_York", 
     
-    // --- Master Limits ---
-    GLOBAL_LIMITS: {
+    // --- V4 ORIGINAL FILTERS (The Money Makers) ---
+    FILTERS: {
+        MIN_MCAP: 10000,        
         MAX_MCAP: 90000,        
         MIN_LIQUIDITY: 1000,    
-        MAX_AGE_MINUTES: 60     
+        MIN_VOLUME_H1: 1000,    // Keep at 1k to catch organic pumps
+        MIN_AGE_MINUTES: 1,     
+        MAX_AGE_MINUTES: 60,    
+        MAX_PRICE_USD: 1.0,     
+        REQUIRE_SOCIALS: true,  
+        MIN_HYPE_SCORE: 10      
     },
 
-    // --- Tracking Strategy ---
     TRACKING: {
         GAIN_MILESTONES: [50, 100, 200, 300, 400, 500, 1000, 2000, 5000, 10000], 
         STOP_LOSS_DROP: 0.85,        
@@ -45,81 +50,17 @@ const CONFIG = {
         MAX_TRACK_DURATION_HR: 24    
     },
 
-    // --- System Intervals (RESTORED TO V4 SPEED) ---
     SYSTEM: {
-        SCAN_INTERVAL_MS: 12000,     // Back to 12s (V4 Speed)
-        TRACK_INTERVAL_MS: 10000,    // Back to 10s (High Speed Tracking)
-        RATE_LIMIT_DELAY: 1500,      // Reduced delay for faster sends
-        RETRY_TIMEOUT_MS: 15000      // Only wait 15s if banned (Aggressive)
+        SCAN_INTERVAL_MS: 12000,     // V4 Speed (12s)
+        TRACK_INTERVAL_MS: 10000,    // V4 Speed (10s)
+        RATE_LIMIT_DELAY: 1500,      
+        RETRY_TIMEOUT_MS: 15000      
     },
 
     URLS: {
         REFERRAL: "https://gmgn.ai/r/Greenchip",
         DEX_API: "https://api.dexscreener.com/latest/dex/search?q=solana",
         TOKEN_API: "https://api.dexscreener.com/latest/dex/tokens/"
-    }
-};
-
-// ==================================================================================
-//  🔥  SCAN ENGINE CONFIGURATIONS
-// ==================================================================================
-
-const ENGINES = {
-    // 1. THE PUMPFUN DEGEN
-    PUMP_TURBO: {
-        id: 'PUMP_TURBO',
-        name: '💊 PumpFun Turbo',
-        emoji: '💊',
-        color: '#14F195', 
-        filter: (pair) => {
-            if (pair.dexId !== 'pump') return false;
-            if (pair.marketCap > 90000) return false;
-            if (pair.volume?.h1 < 1000) return false; 
-            return true;
-        }
-    },
-
-    // 2. AXIOM PULSE / GRADUATING
-    AXIOM_PULSE: {
-        id: 'AXIOM_PULSE',
-        name: '⚡ Axiom/Pulse Trend',
-        emoji: '⚡',
-        color: '#00D4FF', 
-        filter: (pair) => {
-            const socials = pair.info?.socials || [];
-            if (socials.length === 0) return false; 
-            if (pair.volume?.h1 < 2000) return false; 
-            const hype = CoinAnalyzer.calculateHypeScore(pair);
-            return hype > 30; 
-        }
-    },
-
-    // 3. SNIPER WATCH
-    SNIPER_WATCH: {
-        id: 'SNIPER_WATCH',
-        name: '🎯 Sniper Watch',
-        emoji: '🎯',
-        color: '#FF0000', 
-        filter: (pair) => {
-            const ageMins = Utils.getAgeNumber(pair.pairCreatedAt);
-            if (ageMins > 10) return false; 
-            if (pair.volume?.h1 < 3000) return false; 
-            return true;
-        }
-    },
-
-    // 4. STANDARD SAFE
-    STANDARD: {
-        id: 'STANDARD',
-        name: '🟢 Standard High Vol',
-        emoji: '🟢',
-        color: '#FFFFFF', 
-        filter: (pair) => {
-            if (pair.marketCap < 10000 || pair.marketCap > 90000) return false;
-            if (pair.volume?.h1 < 1000) return false;
-            if (pair.liquidity?.usd < 1000) return false;
-            return true;
-        }
     }
 };
 
@@ -144,11 +85,7 @@ const Utils = {
         return '$' + num.toFixed(6);
     },
 
-    getAgeNumber: (timestamp) => {
-        return (Date.now() - timestamp) / 60000;
-    },
-
-    getAgeString: (timestamp) => {
+    getAge: (timestamp) => {
         const diffMs = Date.now() - timestamp;
         const mins = Math.floor(diffMs / 60000);
         if (mins < 1) return '🔥 Just Launched';
@@ -225,7 +162,7 @@ class LeaderboardManager {
             address: callData.address,
             entryPrice: callData.entryPrice,
             highestGain: 0,
-            engine: callData.engineName,
+            engine: callData.engineName || 'Standard',
             timestamp: Date.now()
         };
         this.dailyCalls.push(entry);
@@ -253,7 +190,7 @@ class LeaderboardManager {
             if (index === 1) medal = "🥈";
             if (index === 2) medal = "🥉";
             
-            description += `${medal} **$${item.symbol}** (${item.engine}) • +${item.highestGain.toFixed(0)}%\n`;
+            description += `${medal} **$${item.symbol}** • +${item.highestGain.toFixed(0)}%\n`;
         });
         
         return description;
@@ -282,11 +219,10 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => {
     res.status(200).json({
         status: 'Operational',
-        uptime: Utils.getAgeString(STATE.stats.startTime),
+        uptime: Utils.getAge(STATE.stats.startTime),
         active_tracks: STATE.activeCalls.size,
         history_db: STATE.processedHistory.size,
-        calls_today: STATE.stats.callsToday,
-        engine_status: 'TURBO MODE ACTIVE'
+        calls_today: STATE.stats.callsToday
     });
 });
 
@@ -308,7 +244,7 @@ const client = new Client({
 });
 
 // ==================================================================================
-//  🛡️  ADVANCED ANTI-RUG & ANALYZER (V2)
+//  🕵️  HYBRID ANALYZER (V4 LOGIC + V5 LABELS)
 // ==================================================================================
 
 class CoinAnalyzer {
@@ -325,42 +261,61 @@ class CoinAnalyzer {
         const socials = pair.info?.socials || [];
         score += (socials.length * 20); 
         
-        const hasWeb = socials.find(s => s.type === 'website');
-        if (hasWeb) score += 15;
-
         if (pair.info?.imageUrl) score += 10;
-
         return score;
     }
 
-    static securityCheck(pair) {
-        const liq = pair.liquidity?.usd || 0;
-        const mc = pair.fdv || pair.marketCap || 0;
+    // This assigns the "Engine" label, but DOES NOT block the coin.
+    static getEngineLabel(pair) {
+        // 1. PumpFun
+        if (pair.dexId === 'pump') return { name: '💊 PumpFun Turbo', color: '#14F195', emoji: '💊' };
         
-        if (liq < CONFIG.GLOBAL_LIMITS.MIN_LIQUIDITY) return { safe: false, reason: 'No Liquidity' };
+        // 2. Sniper (New & High Vol)
+        const ageMins = (Date.now() - pair.pairCreatedAt) / 60000;
+        if (ageMins < 10 && (pair.volume?.h1 > 3000)) return { name: '🎯 Sniper Watch', color: '#FF0000', emoji: '🎯' };
         
-        if (mc > 20000 && liq < 500) return { safe: false, reason: 'Liquidity Mismatch (Honey Pot Risk)' };
-
-        if (parseFloat(pair.priceUsd) > 1.5) return { safe: false, reason: 'Suspicious Price Peg' };
-
-        return { safe: true };
+        // 3. Axiom/Trend
+        const hype = this.calculateHypeScore(pair);
+        if (hype > 40) return { name: '⚡ Axiom Trend', color: '#00D4FF', emoji: '⚡' };
+        
+        // 4. Standard
+        return { name: '🟢 Standard High Vol', color: '#FFFFFF', emoji: '🟢' };
     }
 
-    static determineEngines(pair) {
-        let matches = [];
+    static validate(pair) {
+        // --- 1. BASIC CHECKS ---
+        if (!pair?.baseToken?.address || !pair?.priceUsd) return { valid: false };
+        if (pair.chainId !== 'solana') return { valid: false };
+        if (STATE.isProcessed(pair.baseToken.address)) return { valid: false };
 
-        if (STATE.isProcessed(pair.baseToken.address)) return [];
-        if (pair.chainId !== 'solana') return [];
+        // --- 2. V4 ORIGINAL FILTERS (Broad & Effective) ---
+        const fdv = pair.fdv || pair.marketCap || 0;
+        if (fdv < CONFIG.FILTERS.MIN_MCAP) return { valid: false };
+        if (fdv > CONFIG.FILTERS.MAX_MCAP) return { valid: false };
 
-        const secCheck = this.securityCheck(pair);
-        if (!secCheck.safe) return [];
+        const createdAt = pair.pairCreatedAt; 
+        if (!createdAt) return { valid: false };
+        const ageMins = (Date.now() - createdAt) / 60000;
+        if (ageMins < CONFIG.FILTERS.MIN_AGE_MINUTES) return { valid: false };
+        if (ageMins > CONFIG.FILTERS.MAX_AGE_MINUTES) return { valid: false };
 
-        if (ENGINES.PUMP_TURBO.filter(pair)) matches.push(ENGINES.PUMP_TURBO);
-        else if (ENGINES.AXIOM_PULSE.filter(pair)) matches.push(ENGINES.AXIOM_PULSE);
-        else if (ENGINES.SNIPER_WATCH.filter(pair)) matches.push(ENGINES.SNIPER_WATCH);
-        else if (ENGINES.STANDARD.filter(pair)) matches.push(ENGINES.STANDARD);
+        const liq = pair.liquidity?.usd || 0;
+        const vol = pair.volume?.h1 || 0;
+        if (liq < CONFIG.FILTERS.MIN_LIQUIDITY) return { valid: false };
+        if (vol < CONFIG.FILTERS.MIN_VOLUME_H1) return { valid: false };
 
-        return matches;
+        const socials = pair.info?.socials || [];
+        if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) return { valid: false };
+
+        // --- 3. RETURN SUCCESS WITH ENGINE LABEL ---
+        const hype = this.calculateHypeScore(pair);
+        const engine = this.getEngineLabel(pair);
+
+        return { 
+            valid: true, 
+            metrics: { hype, ageMins, fdv, liq, vol },
+            engine: engine
+        };
     }
 }
 
@@ -368,7 +323,7 @@ class CoinAnalyzer {
 //  📢  MESSAGE BUILDER
 // ==================================================================================
 
-async function sendCallAlert(pair, engine) {
+async function sendCallAlert(pair, metrics, engine) {
     const channel = client.channels.cache.get(process.env.CHANNEL_ID);
     if (!channel) return Utils.log('ERROR', 'Channel not found');
 
@@ -380,13 +335,6 @@ async function sendCallAlert(pair, engine) {
     const dexLink = `https://dexscreener.com/solana/${pair.pairAddress}`;
     const photonLink = `https://photon-sol.tinyastro.io/en/lp/${pair.pairAddress}`;
     
-    // Metrics
-    const hype = CoinAnalyzer.calculateHypeScore(pair);
-    const mc = pair.fdv || pair.marketCap || 0;
-    const liq = pair.liquidity?.usd || 0;
-    const vol = pair.volume?.h1 || 0;
-    const age = Utils.getAgeString(pair.pairCreatedAt);
-
     const embed = new EmbedBuilder()
         .setColor(engine.color)
         .setTitle(`${engine.emoji} ${engine.name.toUpperCase()}: ${token.name} ($${token.symbol})`)
@@ -394,14 +342,14 @@ async function sendCallAlert(pair, engine) {
         .setDescription(`
 ${socialText}
 
-**Metrics:** \`$${Utils.formatUSD(mc)} MC\` • \`$${Utils.formatUSD(liq)} Liq\`
-**Volume:** \`$${Utils.formatUSD(vol)} (1h)\` • **Price:** \`${Utils.formatPrice(parseFloat(pair.priceUsd))}\`
-**Age:** ${age} • **Hype:** \`${hype}/100\`
+**Metrics:** \`$${Utils.formatUSD(metrics.fdv)} MC\` • \`$${Utils.formatUSD(metrics.liq)} Liq\`
+**Volume:** \`$${Utils.formatUSD(metrics.vol)} (1h)\` • **Price:** \`${Utils.formatPrice(parseFloat(pair.priceUsd))}\`
+**Age:** ${Utils.getAge(pair.pairCreatedAt)} • **Hype:** \`${metrics.hype}/100\`
 
 [**📈 DexScreener**](${dexLink}) • [**⚡ Photon**](${photonLink}) • [**🛒 GMGN**](${CONFIG.URLS.REFERRAL})
 `)
         .setThumbnail(pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png')
-        .setFooter({ text: `Green Chip V5 • Engine: ${engine.id} • ${Utils.getCurrentTime()}`, iconURL: client.user.displayAvatarURL() });
+        .setFooter({ text: `Green Chip V6 • ${Utils.getCurrentTime()}`, iconURL: client.user.displayAvatarURL() });
 
     const copyButton = new ButtonBuilder()
         .setCustomId(`copy_ca_${token.address}`)
@@ -431,7 +379,7 @@ ${socialText}
             lastUpdate: Date.now()
         });
 
-        Utils.log('SUCCESS', `Sent Call [${engine.id}]: ${token.name}`);
+        Utils.log('SUCCESS', `Sent Call: ${token.name}`);
     } catch (err) {
         Utils.log('ERROR', `Failed to send embed: ${err.message}`);
     }
@@ -469,7 +417,7 @@ async function sendGainUpdate(callData, currentPrice, pairData, type = 'GAIN') {
             .setColor(embedColor)
             .setTitle(`${emoji} ${title}`)
             .setDescription(description)
-            .setFooter({ text: `Green Chip V5 • ${callData.engineName} • ${Utils.getCurrentTime()}` });
+            .setFooter({ text: `Green Chip V6 • ${callData.engineName} • ${Utils.getCurrentTime()}` });
 
         await originalMsg.reply({ embeds: [embed] });
 
@@ -495,10 +443,10 @@ async function postLeaderboard(type) {
 }
 
 // ==================================================================================
-//  🔄  MULTI-ENGINE CORE LOOPS
+//  🔄  CORE LOOPS (V4 SPEED + V5 LOGIC)
 // ==================================================================================
 
-// 1. Master Scanner
+// 1. Scanner Loop
 async function runScanner() {
     try {
         STATE.stats.apiRequests++;
@@ -512,16 +460,15 @@ async function runScanner() {
 
         const pairs = res.data?.pairs || [];
 
-        // 🟢 HEARTBEAT LOG (Scanning Speed)
-        Utils.log('INFO', `Scanning ${pairs.length} pairs (V4 Speed)...`);
+        // 🟢 HEARTBEAT LOG
+        Utils.log('INFO', `Scanning ${pairs.length} pairs (Hybrid Mode)...`);
 
         for (const pair of pairs) {
-            const matchedEngines = CoinAnalyzer.determineEngines(pair);
-
-            if (matchedEngines.length > 0) {
-                const engine = matchedEngines[0];
+            const check = CoinAnalyzer.validate(pair);
+            
+            if (check.valid) {
                 STATE.addProcessed(pair.baseToken.address);
-                await sendCallAlert(pair, engine);
+                await sendCallAlert(pair, check.metrics, check.engine);
                 await Utils.sleep(CONFIG.SYSTEM.RATE_LIMIT_DELAY);
             }
         }
@@ -538,7 +485,7 @@ async function runScanner() {
     }
 }
 
-// 2. High-Speed Tracker
+// 2. Tracker Loop
 async function runTracker() {
     if (STATE.activeCalls.size === 0) {
         setTimeout(runTracker, CONFIG.SYSTEM.TRACK_INTERVAL_MS);
@@ -629,13 +576,12 @@ client.on('messageCreate', async (message) => {
     if (message.content === '!test') {
         const embed = new EmbedBuilder()
             .setColor('#00FF00')
-            .setTitle('🟢 GREEN CHIP V5 - TURBO MODE ONLINE')
+            .setTitle('🟢 GREEN CHIP V6 - HYBRID MODE ONLINE')
             .setDescription(`Timezone: ${CONFIG.TIMEZONE} | Time: ${Utils.getCurrentTime()}`)
             .addFields(
-                { name: '⏱️ Uptime', value: Utils.getAgeString(STATE.stats.startTime), inline: true },
+                { name: '⏱️ Uptime', value: Utils.getAge(STATE.stats.startTime), inline: true },
                 { name: '📡 Active Tracks', value: `${STATE.activeCalls.size}`, inline: true },
-                { name: '🎯 Calls Today', value: `${STATE.stats.callsToday}`, inline: true },
-                { name: '🚀 Engines', value: 'PumpFun, Axiom, Sniper, Standard', inline: false }
+                { name: '🎯 Calls Today', value: `${STATE.stats.callsToday}`, inline: true }
             );
         await message.reply({ embeds: [embed] });
     }
@@ -647,7 +593,7 @@ client.on('messageCreate', async (message) => {
 
 client.once('ready', () => {
     Utils.log('SUCCESS', `Logged in as ${client.user.tag}`);
-    Utils.log('INFO', `Green Chip V5 Loaded. Engines: ${Object.keys(ENGINES).length} Active.`);
+    Utils.log('INFO', `Green Chip V6 Hybrid Logic Loaded.`);
     
     client.user.setPresence({
         activities: [{ name: 'Solana Chain 24/7', type: ActivityType.Watching }],
