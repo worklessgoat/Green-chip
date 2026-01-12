@@ -1,14 +1,14 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V8 "DAILY RECAP" - ENTERPRISE TRADING ENGINE
+//  🟢 GREEN CHIP V8 "COMPACT" - ENTERPRISE TRADING ENGINE
 //  ---------------------------------------------------------------------------------
 //  New Capabilities:
-//  [1] 📅 DAILY/WEEKLY/MONTHLY RECAPS: Auto-posts leaderboards (US Time).
-//  [2] 🔘 COPY CA BUTTON: One-click copy for mobile/desktop.
-//  [3] 🛡️ ANTI-SPAM: Replies only on 45% increments (45%, 90%, 135%...).
-//  [4] 📊 MCAP COMPARE: Shows "From X Mcap to Y Mcap" in gains.
+//  [1] 📏 COMPACT MODE: No empty spaces, small messages.
+//  [2] 🛡️ ANTI-SPAM: Starts at 45%, updates on New Highs.
+//  [3] 🔘 COPY CA BUTTON: One-click copy.
+//  [4] 📈 NEW HIGH TRACKER: "From X Mcap to Y Mcap".
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
-//  Version: 8.2.1-FIXED-IMPORTS
+//  Version: 8.4.0-COMPACT-FIXED
 // ==================================================================================
 
 require('dotenv').config();
@@ -16,17 +16,17 @@ const {
     Client, 
     GatewayIntentBits, 
     EmbedBuilder, 
-    ActivityType,     // RESTORED
-    Partials,         // RESTORED
-    ActionRowBuilder, // Added for buttons
-    ButtonBuilder,    // Added for buttons
-    ButtonStyle       // Added for buttons
+    ActivityType,     
+    Partials,         
+    ActionRowBuilder, 
+    ButtonBuilder,    
+    ButtonStyle       
 } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
-const moment = require('moment-timezone'); // Ensure 'npm install moment-timezone'
+const moment = require('moment-timezone'); 
 
-// Set Global Timezone to US (Eastern Time)
+// Timezone: United States
 moment.tz.setDefault("America/New_York");
 
 // ==================================================================================
@@ -35,9 +35,8 @@ moment.tz.setDefault("America/New_York");
 
 const CONFIG = {
     BOT_NAME: "Green Chip V8",
-    VERSION: "8.2.1-STABLE",
+    VERSION: "8.4.0-COMPACT",
     
-    // --- Strategy Filters ---
     FILTERS: {
         MIN_MCAP: 20000,         
         MAX_MCAP: 55000,         
@@ -49,16 +48,13 @@ const CONFIG = {
         ANTI_SPAM_NAMES: true    
     },
 
-    // --- Tracking & Auto-Trading Logic ---
     TRACKER: {
-        STOP_LOSS_PCT: -85,      // Stop if drops 85% below entry
-        RUG_CHECK_LIQ: 300,      // If liq < $300, it's a rug
-        MIN_GAIN_TRIGGER: 45,    // 🟢 First alert at 45%
-        GAIN_STEP: 45,           // 🟢 Next alert must be +45% higher (90, 135, etc)
+        STOP_LOSS: 0.85,         // Stop at -85%
+        RUG_CHECK_LIQ: 300,      
+        MIN_GAIN_START: 45,      // 🟢 Start replying only at +45%
         MAX_HOURS: 24            
     },
 
-    // --- System Intervals ---
     SYSTEM: {
         SCAN_DELAY_PROFILES: 15000,  
         SCAN_DELAY_BOOSTS: 30000,    
@@ -68,7 +64,6 @@ const CONFIG = {
         DAILY_CHECK_INTERVAL: 60000  
     },
 
-    // --- Data Sources ---
     ENDPOINTS: {
         PROFILES: "https://api.dexscreener.com/token-profiles/latest/v1",
         BOOSTS: "https://api.dexscreener.com/token-boosts/latest/v1",
@@ -105,9 +100,9 @@ const Utils = {
     getAge: (ts) => {
         const diff = Date.now() - ts;
         const m = Math.floor(diff / 60000);
-        if (m < 1) return '🔥 Just Launched';
-        if (m < 60) return `${m}m ago`;
-        return `${Math.floor(m/60)}h ${m%60}m ago`;
+        if (m < 1) return '🔥 New';
+        if (m < 60) return `${m}m`;
+        return `${Math.floor(m/60)}h ${m%60}m`;
     },
 
     getHeaders: () => {
@@ -119,13 +114,13 @@ const Utils = {
 
     log: (type, source, msg) => {
         const t = moment().format('HH:mm:ss');
-        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', FOUND: '💎', REPORT: '📊' };
+        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', FOUND: '💎', DAILY: '📅' };
         console.log(`[${t}] ${icons[type]} [${source}] ${msg}`);
     }
 };
 
 // ==================================================================================
-//  🧠  MEMORY & DEDUPLICATION (STATE)
+//  🧠  MEMORY & STATE
 // ==================================================================================
 
 class StateManager {
@@ -139,7 +134,7 @@ class StateManager {
         this.weeklyStats = new Map();
         this.monthlyStats = new Map();
 
-        this.lastReportDate = null;        
+        this.lastReportDate = null;
         this.lastReportWeek = null;
         this.lastReportMonth = null;
         
@@ -185,11 +180,10 @@ class StateManager {
             if (map.has(address)) {
                 const stat = map.get(address);
                 if (gain > stat.maxGain) stat.maxGain = gain;
-                stat.status = status;
+                stat.status = status; 
                 map.set(address, stat);
             }
         };
-
         updateMap(this.dailyStats);
         updateMap(this.weeklyStats);
         updateMap(this.monthlyStats);
@@ -238,7 +232,7 @@ class RiskEngine {
 }
 
 // ==================================================================================
-//  📡  MULTI-THREADED SCANNERS
+//  📡  SCANNERS
 // ==================================================================================
 
 async function scanProfiles() {
@@ -305,7 +299,7 @@ function processPair(pair, source) {
 function handleErr(source, e) {}
 
 // ==================================================================================
-//  💬  DISCORD SENDER (WITH COPY BUTTON)
+//  💬  DISCORD SENDER (COMPACT MODE)
 // ==================================================================================
 
 const client = new Client({
@@ -336,18 +330,18 @@ async function sendAlert(pair, analysis, source) {
     if (source === 'PROFILE') { badge = '💎'; color = '#00D4FF'; }
     if (analysis.status === 'GRADUATED') { badge = '🎓'; color = '#00FF00'; }
 
-    const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ') || '⚠️ No Socials';
+    const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ') || 'No Socials';
 
-    // 🟢 COMPACT FIX: Reverted to your structure, but removed extra \n newlines to fit better
+    // 🟢 COMPACT DESCRIPTION: Removed extra newlines and combined fields
     const embed = new EmbedBuilder()
         .setColor(color)
         .setTitle(`${badge} ${token.name} ($${token.symbol})`)
         .setURL(dexLink)
-        .setDescription(`**Source:** ${source} | **Status:** ${analysis.status}\n${links}\n**Contract:** \`${token.address}\`\n> **📊 METRICS**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Price:** \`${Utils.formatPrice(parseFloat(pair.priceUsd))}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\`\n> • **Vol (1h):** \`${Utils.formatUSD(analysis.vol)}\`\n> • **Age:** \`${Utils.getAge(pair.pairCreatedAt)}\`\n**🎯 HYPE SCORE: ${analysis.hype}/100**\n${analysis.hype > 40 ? "🔥 HIGH MOMENTUM" : "✅ STEADY"}\n[**🛒 BUY ON GMGN (LOWER FEES)**](${CONFIG.URLS.REFERRAL})`)
+        .setDescription(`**Src:** ${source} | **Sts:** ${analysis.status}\n${links}\n**CA:** \`${token.address}\`\n**MC:** \`${Utils.formatUSD(analysis.fdv)}\` • **Pr:** \`${Utils.formatPrice(parseFloat(pair.priceUsd))}\`\n**Liq:** \`${Utils.formatUSD(analysis.liq)}\` • **Vol:** \`${Utils.formatUSD(analysis.vol)}\` • **Age:** \`${Utils.getAge(pair.pairCreatedAt)}\`\n**🎯 SCORE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`)
         .setThumbnail(pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png')
         .setFooter({ text: `Green Chip V8 • ${moment().format('h:mm A z')}`, iconURL: client.user.displayAvatarURL() });
 
-    // 🔘 Create Copy Button
+    // 🔘 Copy Button
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`copy_ca_${token.address}`)
@@ -363,9 +357,9 @@ async function sendAlert(pair, analysis, source) {
             name: token.name,
             symbol: token.symbol,
             entry: parseFloat(pair.priceUsd),
-            entryMcap: analysis.fdv, // Store Entry Mcap for the report
+            entryMcap: analysis.fdv, 
             maxGain: 0,
-            lastReportedGain: 0, // Track last gain we sent a message for
+            lastReportedGain: 0, 
             msgId: msg.id,
             chanId: channel.id,
             start: Date.now()
@@ -378,7 +372,6 @@ async function sendAlert(pair, analysis, source) {
     }
 }
 
-// 🔘 Button Interaction Handler
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     if (interaction.customId.startsWith('copy_ca_')) {
@@ -388,36 +381,29 @@ client.on('interactionCreate', async interaction => {
 });
 
 // ==================================================================================
-//  📅  LEADERBOARD SYSTEM (Daily, Weekly, Monthly) - US TIMEZONE
+//  📅  LEADERBOARDS
 // ==================================================================================
 
 function initDailyScheduler() {
     setInterval(async () => {
-        const now = moment(); // Uses US Timezone defined at top
-        
-        // 12:00 AM Check
+        const now = moment(); 
         if (now.hour() === 0 && now.minute() === 0) {
             const todayStr = now.format("YYYY-MM-DD");
             
-            // 1. Daily Report
             if (STATE.lastReportDate !== todayStr) {
                 await sendLeaderboard('DAILY', STATE.dailyStats);
                 STATE.lastReportDate = todayStr;
-                STATE.dailyStats.clear(); // Reset Daily
+                STATE.dailyStats.clear();
             }
-
-            // 2. Weekly Report (Sunday = 0)
             if (now.day() === 0 && STATE.lastReportWeek !== todayStr) {
                 await sendLeaderboard('WEEKLY', STATE.weeklyStats);
                 STATE.lastReportWeek = todayStr;
-                STATE.weeklyStats.clear(); // Reset Weekly
+                STATE.weeklyStats.clear();
             }
-
-            // 3. Monthly Report (1st of month)
             if (now.date() === 1 && STATE.lastReportMonth !== todayStr) {
                 await sendLeaderboard('MONTHLY', STATE.monthlyStats);
                 STATE.lastReportMonth = todayStr;
-                STATE.monthlyStats.clear(); // Reset Monthly
+                STATE.monthlyStats.clear();
             }
         }
     }, CONFIG.SYSTEM.DAILY_CHECK_INTERVAL);
@@ -432,12 +418,7 @@ async function sendLeaderboard(type, mapData) {
 
     if (sorted.length === 0) return;
 
-    const titleMap = {
-        'DAILY': `📅 DAILY LEADERBOARD`,
-        'WEEKLY': `🔥 WEEKLY HALL OF FAME`,
-        'MONTHLY': `👑 MONTHLY GOD MODE`
-    };
-
+    const titleMap = { 'DAILY': `📅 DAILY`, 'WEEKLY': `🔥 WEEKLY`, 'MONTHLY': `👑 MONTHLY` };
     let description = `**Top Performers (${moment().subtract(1, 'day').format('MMMM Do')}):**\n\n`;
 
     sorted.forEach((coin, index) => {
@@ -447,27 +428,20 @@ async function sendLeaderboard(type, mapData) {
         if (coin.status === 'RUG') icon = '💀';
 
         description += `**#${index + 1} ${icon} ${coin.name} ($${coin.symbol})**\n`;
-        description += `Peak Gain: **+${coin.maxGain.toFixed(0)}%**\n`;
-        description += `Status: ${coin.status}\n\n`;
+        description += `Peak: **+${coin.maxGain.toFixed(0)}%** • ${coin.status}\n`;
     });
 
     const embed = new EmbedBuilder()
         .setColor('#FFD700')
         .setTitle(titleMap[type])
         .setDescription(description)
-        .setTimestamp()
-        .setFooter({ text: `Green Chip V8 • ${type} Stats` });
+        .setTimestamp();
 
-    try {
-        await channel.send({ embeds: [embed] });
-        Utils.log('REPORT', type, `Sent ${type} Leaderboard.`);
-    } catch (e) {
-        Utils.log('ERROR', 'Leaderboard', e.message);
-    }
+    try { await channel.send({ embeds: [embed] }); } catch (e) {}
 }
 
 // ==================================================================================
-//  📈  TRACKER (45% INTERVAL + NEW FORMAT)
+//  📈  TRACKER (45% START + NEW HIGHS ONLY)
 // ==================================================================================
 
 async function runTracker() {
@@ -478,7 +452,6 @@ async function runTracker() {
 
     for (const [addr, data] of STATE.activeTracks) {
         try {
-            // Drop old tracks
             if (Date.now() - data.start > (CONFIG.TRACKER.MAX_HOURS * 3600000)) {
                 STATE.activeTracks.delete(addr);
                 continue;
@@ -493,37 +466,25 @@ async function runTracker() {
             const liq = pair.liquidity?.usd || 0;
             const gain = ((currPrice - data.entry) / data.entry) * 100;
 
-            // Update Leaderboard Memory
             STATE.updatePeak(addr, gain, 'ACTIVE');
 
-            // 🛑 STOP LOSS & RUG CHECK (-85% or Low Liq)
-            if (gain <= CONFIG.TRACKER.STOP_LOSS_PCT || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
+            // 🛑 STOP LOSS (-85%)
+            if (gain <= -(CONFIG.TRACKER.STOP_LOSS * 100) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
                 await sendUpdate(data, currPrice, gain, 'RUG', currMcap);
                 STATE.updatePeak(addr, gain, 'RUG');
-                STATE.activeTracks.delete(addr); // Stop tracking
+                STATE.activeTracks.delete(addr); 
                 continue;
             }
 
-            // 🟢 GAIN CHECK (Anti-Spam: Every 45%)
-            // 1. Must be higher than Minimum Gain (45%)
-            // 2. Must be higher than the last reported gain PLUS the step (45%)
-            //    Example: 45% -> 90% -> 135% -> 180%
-            
-            const nextThreshold = data.lastReportedGain + CONFIG.TRACKER.GAIN_STEP;
-            
-            // Trigger 1: First time hitting 45% (and lastReported was 0)
-            const isFirstTrigger = data.lastReportedGain === 0 && gain >= CONFIG.TRACKER.MIN_GAIN_TRIGGER;
-            
-            // Trigger 2: Hitting the next 45% step
-            const isNextStep = data.lastReportedGain > 0 && gain >= nextThreshold;
-
-            if (isFirstTrigger || isNextStep) {
-                await sendUpdate(data, currPrice, gain, 'GAIN', currMcap);
+            // 🚀 NEW HIGH CHECK
+            if (gain > data.lastReportedGain) {
                 
-                // Set last reported to the current gain so next check is (current + 45)
-                data.lastReportedGain = gain; 
-                
-                if (gain > data.maxGain) data.maxGain = gain; // Update Max
+                // 🟢 START ALERTING AT 45% (Configurable)
+                if (gain >= CONFIG.TRACKER.MIN_GAIN_START) {
+                    await sendUpdate(data, currPrice, gain, 'GAIN', currMcap);
+                    data.lastReportedGain = gain; 
+                    if (gain > data.maxGain) data.maxGain = gain;
+                }
             }
 
         } catch (e) {}
@@ -543,23 +504,22 @@ async function sendUpdate(data, price, gain, type, currentMcap) {
         let text = '';
 
         if (type === 'RUG') {
-            color = '#FF0000';
+            color = '#FF0000'; 
             text = `🚨 **STOPPED:** Token hit -85% or Rugged.`;
         } else {
-            // 🟢 REQUESTED FORMAT: "From X Mcap to Y Mcap"
-            text = `🟢 **${gain.toFixed(0)}% gained**\nFrom \`${Utils.formatUSD(data.entryMcap)}\` market cap to \`${Utils.formatUSD(currentMcap)}\` market cap`;
-            
-            if (gain > 100) color = '#00D4FF'; 
-            if (gain > 500) {
-                color = '#FFD700'; 
-                text = `🚀 **${gain.toFixed(0)}% gained**\nFrom \`${Utils.formatUSD(data.entryMcap)}\` market cap to \`${Utils.formatUSD(currentMcap)}\` market cap`;
+            // Mcap Format
+            if (gain > 200) { 
+                 text = `🚀 **${gain.toFixed(0)}% gained** from \`${Utils.formatUSD(data.entryMcap)}\` market cap to \`${Utils.formatUSD(currentMcap)}\` market cap`;
+                 color = '#FFD700'; 
+            } else {
+                 text = `🟢 **${gain.toFixed(0)}% gained**`;
             }
         }
 
         const embed = new EmbedBuilder()
             .setColor(color)
             .setDescription(`${text}\n[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`)
-            .setTimestamp(); // Uses local time
+            .setTimestamp();
 
         await msg.reply({ embeds: [embed] });
         
@@ -567,18 +527,17 @@ async function sendUpdate(data, price, gain, type, currentMcap) {
 }
 
 // ==================================================================================
-//  🔧  COMMANDS & SERVER
+//  🔧  SERVER
 // ==================================================================================
 
 client.on('messageCreate', async (m) => {
     if (m.author.bot) return;
-    
     if (m.content === '!test') {
-        const embed = new EmbedBuilder()
-            .setColor('#00FF00')
-            .setTitle('🟢 GREEN CHIP V8 - ONLINE')
-            .setDescription(`Timezone: America/New_York\nCurrent Time: ${moment().format('h:mm A z')}`)
-        await m.reply({ embeds: [embed] });
+        await m.reply({ content: `🟢 System Online • US Time: ${moment().format('h:mm A z')}` });
+    }
+    if (m.content === '!forcereport') {
+        await sendLeaderboard('DAILY', STATE.dailyStats);
+        await m.reply("✅ Report sent.");
     }
 });
 
@@ -586,7 +545,6 @@ const app = express();
 app.get('/', (req, res) => res.json({ status: 'ONLINE', version: CONFIG.VERSION }));
 app.listen(process.env.PORT || 3000);
 
-// Start
 client.once('ready', () => {
     Utils.log('SUCCESS', 'System', `Logged in as ${client.user.tag}`);
     scanProfiles();
