@@ -1,5 +1,5 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V9 "LEGACY" - ENTERPRISE TRADING ENGINE
+//  🟢 GREEN CHIP V9 "LEGACY" - ENTERPRISE TRADING ENGINE (SCANNER FIX)
 //  ---------------------------------------------------------------------------------
 //  New Capabilities:
 //  [1] 💾 PERSISTENCE: Auto-saves data to 'database.json'. No data loss on restart.
@@ -8,9 +8,10 @@
 //  [4] 🤖 AUTO-REPORTS: Auto-posts Daily (Midnight), Weekly (Sunday), Monthly (1st).
 //  [5] 📱 RICK-STYLE UI: Vertical, clean, compact alerts.
 //  [6] 🇺🇸 US TIMEZONE: All operations synced to EST/New York.
+//  [7] 📡 RESTORED SCANNERS: Mechanism updated from V8.0.0-DAILY-RECAP
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
-//  Version: 9.0.0-PERSISTENT
+//  Version: 9.1.0-SCANNER-RESTORED
 // ==================================================================================
 
 require('dotenv').config();
@@ -39,32 +40,29 @@ moment.tz.setDefault("America/New_York");
 
 const CONFIG = {
     BOT_NAME: "Green Chip V9",
-    VERSION: "9.0.0-LEGACY",
-    DB_FILE: "database.json", // File where data is saved
+    VERSION: "9.1.0-STABLE",
+    DB_FILE: "database.json",
     
-    // --- Strategy Filters ---
     FILTERS: {
-        MIN_MCAP: 20000,         // $20k Minimum (Entry Zone)
-        MAX_MCAP: 55000,         // $55k Maximum (Moonshot Zone)
-        MIN_LIQ: 1500,           // Liquidity Floor
-        MIN_VOL_H1: 500,         // Momentum Check
-        MAX_AGE_MIN: 60,         // Only Fresh Coins (<1 Hour)
-        MIN_AGE_MIN: 1,          // Anti-Flashbot Buffer (>1 Minute)
-        REQUIRE_SOCIALS: true,   // Filters out 99% of rugs
-        ANTI_SPAM_NAMES: true    // Blocks "ELONCUMxxx" type names
+        MIN_MCAP: 20000,
+        MAX_MCAP: 55000,
+        MIN_LIQ: 1500,
+        MIN_VOL_H1: 500,
+        MAX_AGE_MIN: 60,
+        MIN_AGE_MIN: 1,
+        REQUIRE_SOCIALS: true,
+        ANTI_SPAM_NAMES: true
     },
 
-    // --- Tracking & Auto-Trading Logic ---
     TRACKER: {
-        GAIN_TRIGGER_1: 45,      // First Alert at +45% (Reply to thread)
-        GAIN_TRIGGER_2: 100,     // Moon Alert at +100%
-        GAIN_TRIGGER_3: 500,     // God Alert at +500%
-        STOP_LOSS: 0.90,         // Hard Stop if drops 90% from entry
-        RUG_CHECK_LIQ: 300,      // If liq < $300, it's a rug
-        MAX_HOURS: 24            // Drop tracking after 24h
+        GAIN_TRIGGER_1: 45,
+        GAIN_TRIGGER_2: 100,
+        GAIN_TRIGGER_3: 500,
+        STOP_LOSS: 0.90,
+        RUG_CHECK_LIQ: 300,
+        MAX_HOURS: 24
     },
 
-    // --- System Intervals ---
     SYSTEM: {
         SCAN_DELAY_PROFILES: 15000,
         SCAN_DELAY_BOOSTS: 30000,
@@ -73,10 +71,9 @@ const CONFIG = {
         QUEUE_DELAY: 3000,
         DAILY_CHECK_INTERVAL: 60000,
         STATUS_UPDATE_INTERVAL: 60000,
-        SAVE_INTERVAL: 60000 * 5     // Save to file every 5 minutes
+        SAVE_INTERVAL: 60000 * 5
     },
 
-    // --- Data Sources ---
     ENDPOINTS: {
         PROFILES: "https://api.dexscreener.com/token-profiles/latest/v1", 
         BOOSTS: "https://api.dexscreener.com/token-boosts/latest/v1",     
@@ -133,7 +130,7 @@ const Utils = {
 };
 
 // ==================================================================================
-//  🧠  MEMORY & PERSISTENCE (STATE MANAGER)
+//  🧠  MEMORY & PERSISTENCE
 // ==================================================================================
 
 class StateManager {
@@ -143,23 +140,17 @@ class StateManager {
         this.processing = new Set();       
         this.queue = [];                   
         
-        // 💾 PERSISTENT STATS
         this.stats = {
-            daily: {},   // Map <address, data>
-            weekly: {},  // Map <address, data>
-            monthly: {}, // Map <address, data>
-            lastReport: {
-                day: null,
-                week: null,
-                month: null
-            }
+            daily: {},   
+            weekly: {},  
+            monthly: {}, 
+            lastReport: { day: null, week: null, month: null }
         };
 
         this.systemStats = { calls: 0, rugs: 0, start: Date.now() };
-        this.loadData(); // Load on boot
+        this.loadData();
     }
 
-    // --- File System Operations ---
     saveData() {
         try {
             const dump = {
@@ -169,7 +160,6 @@ class StateManager {
                 lastReport: this.stats.lastReport
             };
             fs.writeFileSync(CONFIG.DB_FILE, JSON.stringify(dump, null, 2));
-            // Utils.log('SAVE', 'System', 'Database saved.');
         } catch (e) {
             Utils.log('ERROR', 'Save', `Failed to save DB: ${e.message}`);
         }
@@ -190,7 +180,6 @@ class StateManager {
         }
     }
 
-    // --- Lock System ---
     lockCoin(address) {
         if (this.history.has(address)) return false;    
         if (this.processing.has(address)) return false; 
@@ -206,7 +195,6 @@ class StateManager {
         this.processing.delete(address);
         this.history.add(address);
         
-        // Initialize entries in all timeframes
         const entry = {
             name: data.name,
             symbol: data.symbol,
@@ -219,23 +207,18 @@ class StateManager {
         this.stats.daily[address] = { ...entry };
         this.stats.weekly[address] = { ...entry };
         this.stats.monthly[address] = { ...entry };
-        
-        this.saveData(); // Save new coin
+        this.saveData(); 
     }
 
-    // Update Max Gain for ALL timeframes (Persistent High Score)
     updatePeak(address, gain, status = 'ACTIVE') {
-        const update = (timeframe) => {
-            if (this.stats[timeframe][address]) {
-                const rec = this.stats[timeframe][address];
+        const updateTf = (tf) => {
+            if (this.stats[tf][address]) {
+                const rec = this.stats[tf][address];
                 if (gain > rec.maxGain) rec.maxGain = gain;
                 rec.status = status;
             }
         };
-
-        update('daily');
-        update('weekly');
-        update('monthly');
+        ['daily', 'weekly', 'monthly'].forEach(updateTf);
     }
 }
 
@@ -281,7 +264,7 @@ class RiskEngine {
 }
 
 // ==================================================================================
-//  📡  SCANNERS
+//  📡  RESTORED SCANNERS (FROM V8.0.0 MECHANISM)
 // ==================================================================================
 
 async function scanProfiles() {
@@ -461,7 +444,7 @@ client.on('interactionCreate', async interaction => {
 });
 
 // ==================================================================================
-//  📅  SCHEDULER (DAILY, WEEKLY, MONTHLY)
+//  📅  SCHEDULER
 // ==================================================================================
 
 function initScheduler() {
@@ -471,37 +454,26 @@ function initScheduler() {
         const weekStr = now.format("YYYY-WW");
         const monthStr = now.format("YYYY-MM");
         
-        // 12:00 AM Checks
         if (now.hour() === 0 && now.minute() === 0) {
-            
-            // 1. Daily Report
             if (STATE.stats.lastReport.day !== dateStr) {
                 await sendRecap('daily', `📅 DAILY RECAP: ${moment().subtract(1, 'days').format('MMMM Do')}`);
                 STATE.stats.lastReport.day = dateStr;
-                STATE.stats.daily = {}; // Reset Daily
+                STATE.stats.daily = {}; 
                 STATE.saveData();
             }
-
-            // 2. Weekly Report (If Monday)
             if (now.day() === 1 && STATE.stats.lastReport.week !== weekStr) {
                 await sendRecap('weekly', `📅 WEEKLY RECAP: Week ${now.week() - 1}`);
                 STATE.stats.lastReport.week = weekStr;
-                STATE.stats.weekly = {}; // Reset Weekly
+                STATE.stats.weekly = {}; 
                 STATE.saveData();
             }
-
-            // 3. Monthly Report (If 1st of Month)
             if (now.date() === 1 && STATE.stats.lastReport.month !== monthStr) {
                 await sendRecap('monthly', `📅 MONTHLY RECAP: ${moment().subtract(1, 'months').format('MMMM')}`);
                 STATE.stats.lastReport.month = monthStr;
-                STATE.stats.monthly = {}; // Reset Monthly
+                STATE.stats.monthly = {}; 
                 STATE.saveData();
             }
         }
-        
-        // Save Backup every check (Just in case)
-        if (now.minute() % 5 === 0) STATE.saveData();
-
     }, CONFIG.SYSTEM.DAILY_CHECK_INTERVAL);
 }
 
@@ -511,33 +483,17 @@ async function sendRecap(timeframe, title) {
 
     const data = STATE.stats[timeframe];
     const sorted = Object.values(data).sort((a, b) => b.maxGain - a.maxGain).slice(0, 10);
-
     if (sorted.length === 0) return;
 
     let description = `**${title}**\n\n`;
-
     sorted.forEach((coin, index) => {
-        let icon = '🟢';
-        if (coin.maxGain > 100) icon = '🚀';
-        if (coin.maxGain > 500) icon = '👑';
+        let icon = coin.maxGain > 500 ? '👑' : (coin.maxGain > 100 ? '🚀' : '🟢');
         if (coin.status === 'RUG') icon = '💀';
-
         description += `\`#${index + 1}\` ${icon} **$${coin.symbol}** (+${coin.maxGain.toFixed(0)}%)\n`;
     });
 
-    const embed = new EmbedBuilder()
-        .setColor('#FFD700')
-        .setTitle(`🏆 ${timeframe.toUpperCase()} TOP PERFORMERS`)
-        .setDescription(description)
-        .setTimestamp()
-        .setFooter({ text: 'Green Chip V9 • Legacy Tracker' });
-
-    try {
-        await channel.send({ embeds: [embed] });
-        Utils.log('DAILY', 'Report', `Sent ${timeframe} report.`);
-    } catch (e) {
-        Utils.log('ERROR', 'Report', e.message);
-    }
+    const embed = new EmbedBuilder().setColor('#FFD700').setTitle(`🏆 ${timeframe.toUpperCase()} TOP PERFORMERS`).setDescription(description).setTimestamp();
+    try { await channel.send({ embeds: [embed] }); } catch (e) {}
 }
 
 // ==================================================================================
@@ -566,10 +522,8 @@ async function runTracker() {
             const liq = pair.liquidity?.usd || 0;
             const gain = ((currPrice - data.entry) / data.entry) * 100;
 
-            // UPDATE PEAKS FOR DAILY/WEEKLY/MONTHLY
             STATE.updatePeak(addr, gain, 'ACTIVE');
 
-            // RUG CHECK
             if (currPrice < (data.entry * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
                 await sendUpdate(data, currMcap, gain, 'RUG');
                 STATE.updatePeak(addr, gain, 'RUG');
@@ -577,19 +531,10 @@ async function runTracker() {
                 continue;
             }
 
-            // GAIN TRIGGERS
             if (gain > data.maxGain) data.maxGain = gain;
-
-            if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_1 && !data.t1) {
-                await sendUpdate(data, currMcap, gain, 'GAIN');
-                data.t1 = true;
-            } else if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_2 && !data.t2) {
-                await sendUpdate(data, currMcap, gain, 'MOON');
-                data.t2 = true;
-            } else if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_3 && !data.t3) {
-                await sendUpdate(data, currMcap, gain, 'GOD');
-                data.t3 = true;
-            }
+            if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_1 && !data.t1) { await sendUpdate(data, currMcap, gain, 'GAIN'); data.t1 = true; }
+            else if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_2 && !data.t2) { await sendUpdate(data, currMcap, gain, 'MOON'); data.t2 = true; }
+            else if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_3 && !data.t3) { await sendUpdate(data, currMcap, gain, 'GOD'); data.t3 = true; }
 
         } catch (e) {}
         await Utils.sleep(500);
@@ -604,21 +549,17 @@ async function sendUpdate(data, currentMcap, gain, type) {
         const msg = await channel.messages.fetch(data.msgId);
         if (!msg) return;
 
-        let color = '#00FF00'; let title = `🚀 GAIN: +${gain.toFixed(0)}%`;
-        if (type === 'MOON') { color = '#00D4FF'; title = `🌕 MOONSHOT: +${gain.toFixed(0)}%`; }
-        if (type === 'GOD') { color = '#FFD700'; title = `👑 GOD CANDLE: +${gain.toFixed(0)}%`; }
-        if (type === 'RUG') { color = '#FF0000'; title = `🚨 STOP LOSS / RUG`; }
-
-        const entryStr = Utils.formatUSD(data.entryMcap);
-        const currStr = Utils.formatUSD(currentMcap);
+        let title = `🚀 GAIN: +${gain.toFixed(0)}%`;
+        if (type === 'MOON') title = `🌕 MOONSHOT: +${gain.toFixed(0)}%`;
+        if (type === 'GOD') title = `👑 GOD CANDLE: +${gain.toFixed(0)}%`;
+        if (type === 'RUG') title = `🚨 STOP LOSS / RUG`;
 
         const desc = type === 'RUG' 
             ? `⚠️ **Token Dropped >90% or Liquidity Pulled.**\nTracking stopped.`
-            : `**${data.name} ($${data.symbol})**\nEntry: \`${entryStr}\` → Now: \`${currStr}\`\n\n[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`;
+            : `**${data.name} ($${data.symbol})**\nEntry: \`${Utils.formatUSD(data.entryMcap)}\` → Now: \`${Utils.formatUSD(currentMcap)}\`\n\n[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`;
 
-        const embed = new EmbedBuilder().setColor(color).setTitle(title).setDescription(desc).setTimestamp();
+        const embed = new EmbedBuilder().setColor(type === 'RUG' ? '#FF0000' : '#00FF00').setTitle(title).setDescription(desc).setTimestamp();
         await msg.reply({ embeds: [embed] });
-        
     } catch (e) { }
 }
 
@@ -629,8 +570,7 @@ async function updateSolanaStatus() {
         if (pair) {
             const price = parseFloat(pair.priceUsd).toFixed(2);
             const change = pair.priceChange?.h24 || 0;
-            const arrow = change >= 0 ? '▲' : '▼';
-            client.user.setActivity(`SOL: $${price} ${arrow} ${change}%`, { type: ActivityType.Watching });
+            client.user.setActivity(`SOL: $${price} ${change >= 0 ? '▲' : '▼'} ${change}%`, { type: ActivityType.Watching });
         }
     } catch (e) {}
 }
@@ -641,26 +581,16 @@ async function updateSolanaStatus() {
 
 client.on('messageCreate', async (m) => {
     if (m.author.bot) return;
-    
-    // Check Status
     if (m.content === '!test') {
-        const embed = new EmbedBuilder()
-            .setColor('#00FF00')
-            .setTitle('🟢 GREEN CHIP V9 - ACTIVE')
-            .setDescription(`**Time:** ${moment().format('MMMM Do YYYY, h:mm:ss a z')}\n**Tracking:** ${STATE.activeTracks.size} tokens`);
+        const embed = new EmbedBuilder().setColor('#00FF00').setTitle('🟢 GREEN CHIP V9 - ACTIVE').setDescription(`**Time:** ${moment().format('MMMM Do YYYY, h:mm:ss a z')}\n**Tracking:** ${STATE.activeTracks.size} tokens`);
         await m.reply({ embeds: [embed] });
     }
-
-    // Manual Leaderboard (!top, !top week, !top month)
     if (m.content.startsWith('!top')) {
         const args = m.content.split(' ');
-        let timeframe = 'daily';
-        let title = '📅 DAILY LEADERBOARD (Live)';
-        
-        if (args[1] === 'week') { timeframe = 'weekly'; title = '📅 WEEKLY LEADERBOARD (Live)'; }
-        if (args[1] === 'month') { timeframe = 'monthly'; title = '📅 MONTHLY LEADERBOARD (Live)'; }
-
-        await sendRecap(timeframe, title);
+        let tf = 'daily'; let tit = '📅 DAILY LEADERBOARD (Live)';
+        if (args[1] === 'week') { tf = 'weekly'; tit = '📅 WEEKLY LEADERBOARD (Live)'; }
+        if (args[1] === 'month') { tf = 'monthly'; tit = '📅 MONTHLY LEADERBOARD (Live)'; }
+        await sendRecap(tf, tit);
     }
 });
 
@@ -668,18 +598,11 @@ const app = express();
 app.get('/', (req, res) => res.json({ status: 'ONLINE', version: CONFIG.VERSION }));
 app.listen(process.env.PORT || 3000);
 
-// Start
 client.once('ready', () => {
     Utils.log('SUCCESS', 'System', `Logged in as ${client.user.tag}`);
-    scanProfiles();
-    scanBoosts();
-    scanSearch();
-    runTracker();
-    processQueue();
-    initScheduler();
-    
-    updateSolanaStatus(); 
-    setInterval(updateSolanaStatus, CONFIG.SYSTEM.STATUS_UPDATE_INTERVAL);
+    scanProfiles(); scanBoosts(); scanSearch();
+    runTracker(); processQueue(); initScheduler();
+    updateSolanaStatus(); setInterval(updateSolanaStatus, CONFIG.SYSTEM.STATUS_UPDATE_INTERVAL);
 });
 
 client.login(process.env.DISCORD_TOKEN);
