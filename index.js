@@ -1,17 +1,16 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V8 "DAILY RECAP" - ENTERPRISE TRADING ENGINE
+//  🟢 GREEN CHIP V9 "LEGACY" - ENTERPRISE TRADING ENGINE
 //  ---------------------------------------------------------------------------------
 //  New Capabilities:
-//  [1] 📅 DAILY RECAP: Auto-posts a "Gains Summary" at 12:00 AM every night.
-//  [2] 🔒 ZERO DUPLICATES: Strict "Lock System" prevents double calls.
-//  [3] 🚀 TRI-SOURCE SCANNER: Profiles + Boosts + Search (Simultaneous).
-//  [4] 🤖 AUTO-TRADING AI: Tracks gains, threads replies, and monitors rugs.
-//  [5] 🇺🇸 US TIMEZONE: All times formatted to US EST.
-//  [6] 📱 RICK-STYLE UI: Compact vertical layout with no dead space.
-//  [7] 📈 LIVE STATUS: Bot displays real-time SOL price in status.
+//  [1] 💾 PERSISTENCE: Auto-saves data to 'database.json'. No data loss on restart.
+//  [2] 📅 MULTI-TIMEFRAME: Tracks Daily, Weekly, and Monthly highest gains.
+//  [3] 🏆 LEADERBOARD CMDS: Use !top, !top week, !top month to see standings.
+//  [4] 🤖 AUTO-REPORTS: Auto-posts Daily (Midnight), Weekly (Sunday), Monthly (1st).
+//  [5] 📱 RICK-STYLE UI: Vertical, clean, compact alerts.
+//  [6] 🇺🇸 US TIMEZONE: All operations synced to EST/New York.
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
-//  Version: 8.2.0-RICK-STYLE
+//  Version: 9.0.0-PERSISTENT
 // ==================================================================================
 
 require('dotenv').config();
@@ -24,11 +23,12 @@ const {
     ActionRowBuilder, 
     ButtonBuilder, 
     ButtonStyle,
-    MessageFlags // 🆕 Added for the warning fix
+    MessageFlags 
 } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
-const moment = require('moment-timezone'); 
+const moment = require('moment-timezone');
+const fs = require('fs');
 
 // Set Timezone to US (New York / EST)
 moment.tz.setDefault("America/New_York");
@@ -38,8 +38,9 @@ moment.tz.setDefault("America/New_York");
 // ==================================================================================
 
 const CONFIG = {
-    BOT_NAME: "Green Chip V8",
-    VERSION: "8.2.0-COMPACT",
+    BOT_NAME: "Green Chip V9",
+    VERSION: "9.0.0-LEGACY",
+    DB_FILE: "database.json", // File where data is saved
     
     // --- Strategy Filters ---
     FILTERS: {
@@ -65,13 +66,14 @@ const CONFIG = {
 
     // --- System Intervals ---
     SYSTEM: {
-        SCAN_DELAY_PROFILES: 15000,  // Check Profiles every 15s
-        SCAN_DELAY_BOOSTS: 30000,    // Check Trending/Boosts every 30s
-        SCAN_DELAY_SEARCH: 60000,    // Deep Search every 60s
-        TRACK_DELAY: 15000,          // Update Prices every 15s
-        QUEUE_DELAY: 3000,           // Discord Rate Limit Protection
-        DAILY_CHECK_INTERVAL: 60000, // Check time every minute for Daily Report
-        STATUS_UPDATE_INTERVAL: 60000 // Update SOL price every 60s
+        SCAN_DELAY_PROFILES: 15000,
+        SCAN_DELAY_BOOSTS: 30000,
+        SCAN_DELAY_SEARCH: 60000,
+        TRACK_DELAY: 15000,
+        QUEUE_DELAY: 3000,
+        DAILY_CHECK_INTERVAL: 60000,
+        STATUS_UPDATE_INTERVAL: 60000,
+        SAVE_INTERVAL: 60000 * 5     // Save to file every 5 minutes
     },
 
     // --- Data Sources ---
@@ -124,35 +126,74 @@ const Utils = {
     },
 
     log: (type, source, msg) => {
-        // Log time in US Timezone
         const t = moment().format('HH:mm:ss');
-        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', FOUND: '💎', DAILY: '📅', STATUS: '📶' };
+        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', FOUND: '💎', DAILY: '📅', SAVE: '💾' };
         console.log(`[${t}] ${icons[type]} [${source}] ${msg}`);
     }
 };
 
 // ==================================================================================
-//  🧠  MEMORY & DEDUPLICATION (STATE)
+//  🧠  MEMORY & PERSISTENCE (STATE MANAGER)
 // ==================================================================================
 
 class StateManager {
     constructor() {
-        this.activeTracks = new Map();     // Currently watched coins
-        this.history = new Set();          // Permanent history (Prevent duplicates)
-        this.processing = new Set();       // Temporary lock during analysis
-        this.queue = [];                   // Discord send queue
+        this.activeTracks = new Map();     
+        this.history = new Set();          
+        this.processing = new Set();       
+        this.queue = [];                   
         
-        // 🆕 DAILY GAINS MEMORY
-        this.dailyStats = new Map();       // Stores performance of ALL calls today
-        this.lastReportDate = null;        // Tracks if we sent the report yet
-        
-        this.stats = { calls: 0, rugs: 0, start: Date.now() };
+        // 💾 PERSISTENT STATS
+        this.stats = {
+            daily: {},   // Map <address, data>
+            weekly: {},  // Map <address, data>
+            monthly: {}, // Map <address, data>
+            lastReport: {
+                day: null,
+                week: null,
+                month: null
+            }
+        };
+
+        this.systemStats = { calls: 0, rugs: 0, start: Date.now() };
+        this.loadData(); // Load on boot
     }
 
-    // --- Lock System (Zero Duplicates) ---
+    // --- File System Operations ---
+    saveData() {
+        try {
+            const dump = {
+                daily: this.stats.daily,
+                weekly: this.stats.weekly,
+                monthly: this.stats.monthly,
+                lastReport: this.stats.lastReport
+            };
+            fs.writeFileSync(CONFIG.DB_FILE, JSON.stringify(dump, null, 2));
+            // Utils.log('SAVE', 'System', 'Database saved.');
+        } catch (e) {
+            Utils.log('ERROR', 'Save', `Failed to save DB: ${e.message}`);
+        }
+    }
+
+    loadData() {
+        if (!fs.existsSync(CONFIG.DB_FILE)) return;
+        try {
+            const raw = fs.readFileSync(CONFIG.DB_FILE);
+            const data = JSON.parse(raw);
+            this.stats.daily = data.daily || {};
+            this.stats.weekly = data.weekly || {};
+            this.stats.monthly = data.monthly || {};
+            this.stats.lastReport = data.lastReport || {};
+            Utils.log('SUCCESS', 'System', 'Database loaded successfully.');
+        } catch (e) {
+            Utils.log('ERROR', 'Load', 'Corrupt DB file, starting fresh.');
+        }
+    }
+
+    // --- Lock System ---
     lockCoin(address) {
-        if (this.history.has(address)) return false;    // Already called ever
-        if (this.processing.has(address)) return false; // Currently checking
+        if (this.history.has(address)) return false;    
+        if (this.processing.has(address)) return false; 
         this.processing.add(address);
         return true;
     }
@@ -165,30 +206,36 @@ class StateManager {
         this.processing.delete(address);
         this.history.add(address);
         
-        // Add to Daily Stats for the midnight report
-        this.dailyStats.set(address, {
+        // Initialize entries in all timeframes
+        const entry = {
             name: data.name,
             symbol: data.symbol,
             entry: data.price,
             maxGain: 0,
             time: Date.now(),
             status: 'ACTIVE'
-        });
+        };
 
-        // Keep history manageable
-        if (this.history.size > 10000) {
-            const it = this.history.values();
-            this.history.delete(it.next().value);
-        }
+        this.stats.daily[address] = { ...entry };
+        this.stats.weekly[address] = { ...entry };
+        this.stats.monthly[address] = { ...entry };
+        
+        this.saveData(); // Save new coin
     }
 
-    updateDailyPeak(address, gain, status = 'ACTIVE') {
-        if (this.dailyStats.has(address)) {
-            const stat = this.dailyStats.get(address);
-            if (gain > stat.maxGain) stat.maxGain = gain;
-            stat.status = status; 
-            this.dailyStats.set(address, stat);
-        }
+    // Update Max Gain for ALL timeframes (Persistent High Score)
+    updatePeak(address, gain, status = 'ACTIVE') {
+        const update = (timeframe) => {
+            if (this.stats[timeframe][address]) {
+                const rec = this.stats[timeframe][address];
+                if (gain > rec.maxGain) rec.maxGain = gain;
+                rec.status = status;
+            }
+        };
+
+        update('daily');
+        update('weekly');
+        update('monthly');
     }
 }
 
@@ -205,7 +252,6 @@ class RiskEngine {
         const fdv = pair.fdv || pair.marketCap || 0;
         const socials = pair.info?.socials || [];
 
-        // Hype Score
         let hype = 0;
         const ratio = vol / liq;
         if (ratio > 0.5) hype += 20;
@@ -213,7 +259,6 @@ class RiskEngine {
         if (socials.length > 0) hype += 20;
         if (pair.info?.header) hype += 10;
         
-        // Safety Checks
         let safe = true;
         if (fdv < CONFIG.FILTERS.MIN_MCAP) safe = false;
         if (fdv > CONFIG.FILTERS.MAX_MCAP) safe = false;
@@ -226,7 +271,6 @@ class RiskEngine {
             if (name.includes('test') || name.length > 20) safe = false;
         }
 
-        // Status
         let status = 'Unknown Source';
         const dex = (pair.dexId || '').toLowerCase();
         if (dex.includes('raydium')) status = 'Raydium';
@@ -237,10 +281,9 @@ class RiskEngine {
 }
 
 // ==================================================================================
-//  📡  MULTI-THREADED SCANNERS
+//  📡  SCANNERS
 // ==================================================================================
 
-// 1. Profiles
 async function scanProfiles() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.PROFILES, { timeout: 5000, headers: Utils.getHeaders() });
@@ -250,7 +293,6 @@ async function scanProfiles() {
     setTimeout(scanProfiles, CONFIG.SYSTEM.SCAN_DELAY_PROFILES);
 }
 
-// 2. Boosts
 async function scanBoosts() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.BOOSTS, { timeout: 5000, headers: Utils.getHeaders() });
@@ -260,7 +302,6 @@ async function scanBoosts() {
     setTimeout(scanBoosts, CONFIG.SYSTEM.SCAN_DELAY_BOOSTS);
 }
 
-// 3. Search
 async function scanSearch() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.SEARCH, { timeout: 5000, headers: Utils.getHeaders() });
@@ -284,10 +325,8 @@ function processPair(pair, source) {
     if (!pair || !pair.baseToken || pair.chainId !== 'solana') return;
     const addr = pair.baseToken.address;
 
-    // 🔒 THE LOCK
     if (!STATE.lockCoin(addr)) return;
 
-    // ⏳ Analysis
     const analysis = RiskEngine.analyze(pair);
     const ageMins = (Date.now() - pair.pairCreatedAt) / 60000;
 
@@ -296,7 +335,6 @@ function processPair(pair, source) {
         return;
     }
 
-    // ✅ Finalize
     STATE.finalizeCoin(addr, { 
         name: pair.baseToken.name, 
         symbol: pair.baseToken.symbol, 
@@ -308,13 +346,11 @@ function processPair(pair, source) {
 }
 
 function handleErr(source, e) {
-    if (!e.response || e.response.status !== 429) {
-        // Utils.log('WARN', source, e.message); 
-    }
+    if (!e.response || e.response.status !== 429) {}
 }
 
 // ==================================================================================
-//  💬  DISCORD SENDER (RICK STYLE - COMPACT UI)
+//  💬  DISCORD SENDER (RICK STYLE UI)
 // ==================================================================================
 
 const client = new Client({
@@ -341,60 +377,41 @@ async function sendAlert(pair, analysis, source) {
     const socials = info.socials || [];
     const dexLink = `https://dexscreener.com/solana/${pair.pairAddress}`;
     
-    // --- 1. Header & Title Construction ---
     let badge = '⚡'; 
     if (source === 'BOOST') badge = '🚀';
     if (source === 'PROFILE') badge = '💎';
     
-    // Format: "💊 Name [MCAP] - SYMBOL/SOL"
     const mcapShort = Utils.formatUSD(analysis.fdv);
     const title = `${badge} ${token.name} [${mcapShort}] - ${token.symbol}/SOL`;
 
-    // --- 2. Body Construction (Rick Style - No Dead Space) ---
     const age = Utils.getAge(pair.pairCreatedAt);
     const price = parseFloat(pair.priceUsd);
     const change1h = pair.priceChange?.h1 || 0;
     
-    // Top Line: Source & Rank (Simulated)
     let body = `**${analysis.status}** 🔥 \n`;
-
-    // Line 1: USD Price
     body += `💵 **USD:** \`${Utils.formatPrice(price)}\`\n`;
-
-    // Line 2: FDV (Market Cap)
     body += `💎 **FDV:** \`${mcapShort}\`\n`;
-
-    // Line 3: Liquidity
     body += `💧 **Liq:** \`${Utils.formatUSD(analysis.liq)}\`\n`;
-
-    // Line 4: Volume & Age
     body += `📊 **Vol:** \`${Utils.formatUSD(analysis.vol)}\` • **Age:** \`${age}\`\n`;
 
-    // Line 5: 1H Change
     const changeEmoji = change1h >= 0 ? '🟢' : '🔴';
     body += `📈 **1H:** \`${change1h}%\` ${changeEmoji}\n`;
 
-    // --- 3. Conditional Socials Line ---
     if (socials.length > 0) {
         const socialLinks = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ');
         body += `\n🔗 ${socialLinks}`;
     }
 
-    // --- 4. Embed Assembly ---
     const embed = new EmbedBuilder()
-        .setColor(change1h >= 0 ? '#00FF00' : '#FF0000') // Green if up, Red if down
+        .setColor(change1h >= 0 ? '#00FF00' : '#FF0000') 
         .setTitle(title)
         .setURL(dexLink)
         .setDescription(body)
         .setFooter({ text: `${CONFIG.BOT_NAME} • ${moment().format('h:mm A z')}` });
 
-    // Add Icon (Profile Pic)
     if (info.imageUrl) embed.setThumbnail(info.imageUrl);
-    
-    // Add Banner (Header)
     if (info.header) embed.setImage(info.header);
 
-    // Buttons (Copy CA & Buy)
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setLabel('Buy on GMGN')
@@ -421,7 +438,7 @@ async function sendAlert(pair, analysis, source) {
             start: Date.now()
         });
         
-        STATE.stats.calls++;
+        STATE.systemStats.calls++;
         Utils.log('SUCCESS', 'Discord', `Sent Alert: ${token.name}`);
     } catch (e) {
         Utils.log('ERROR', 'Discord', e.message);
@@ -429,16 +446,13 @@ async function sendAlert(pair, analysis, source) {
 }
 
 // ==================================================================================
-//  🖱️  INTERACTION HANDLER (FIXED WARNING)
+//  🖱️  INTERACTIONS
 // ==================================================================================
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
-
     if (interaction.customId.startsWith('copy_')) {
         const ca = interaction.customId.split('_')[1];
-        
-        // 🔧 FIXED: Using MessageFlags instead of { ephemeral: true }
         await interaction.reply({ 
             content: `\`${ca}\``, 
             flags: MessageFlags.Ephemeral 
@@ -447,62 +461,60 @@ client.on('interactionCreate', async interaction => {
 });
 
 // ==================================================================================
-//  📶  REAL-TIME SOL STATUS (NEW FEATURE)
+//  📅  SCHEDULER (DAILY, WEEKLY, MONTHLY)
 // ==================================================================================
 
-async function updateSolanaStatus() {
-    try {
-        // Fetch Wrapped SOL price from DexScreener
-        const res = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112`);
-        const pair = res.data?.pairs?.[0];
-        
-        if (pair) {
-            const price = parseFloat(pair.priceUsd).toFixed(2);
-            const change = pair.priceChange?.h24 || 0;
-            const arrow = change >= 0 ? '▲' : '▼';
-            
-            // Format: "Watching SOL: $150.20 ▲ 2.5%"
-            client.user.setActivity(`SOL: $${price} ${arrow} ${change}%`, { type: ActivityType.Watching });
-            // Utils.log('STATUS', 'System', `Updated Status: SOL $${price}`);
-        }
-    } catch (e) {
-        // Utils.log('WARN', 'Status', 'Failed to fetch SOL price');
-    }
-}
-
-// ==================================================================================
-//  📅  DAILY RECAP SYSTEM
-// ==================================================================================
-
-function initDailyScheduler() {
+function initScheduler() {
     setInterval(async () => {
         const now = moment();
-        // Check 12:00 AM (EST)
+        const dateStr = now.format("YYYY-MM-DD");
+        const weekStr = now.format("YYYY-WW");
+        const monthStr = now.format("YYYY-MM");
+        
+        // 12:00 AM Checks
         if (now.hour() === 0 && now.minute() === 0) {
-            const todayStr = now.format("YYYY-MM-DD");
             
-            if (STATE.lastReportDate !== todayStr) {
-                await sendDailyRecap();
-                STATE.lastReportDate = todayStr;
-                STATE.dailyStats.clear();
-                Utils.log('DAILY', 'System', 'Daily Stats Reset for new day.');
+            // 1. Daily Report
+            if (STATE.stats.lastReport.day !== dateStr) {
+                await sendRecap('daily', `📅 DAILY RECAP: ${moment().subtract(1, 'days').format('MMMM Do')}`);
+                STATE.stats.lastReport.day = dateStr;
+                STATE.stats.daily = {}; // Reset Daily
+                STATE.saveData();
+            }
+
+            // 2. Weekly Report (If Monday)
+            if (now.day() === 1 && STATE.stats.lastReport.week !== weekStr) {
+                await sendRecap('weekly', `📅 WEEKLY RECAP: Week ${now.week() - 1}`);
+                STATE.stats.lastReport.week = weekStr;
+                STATE.stats.weekly = {}; // Reset Weekly
+                STATE.saveData();
+            }
+
+            // 3. Monthly Report (If 1st of Month)
+            if (now.date() === 1 && STATE.stats.lastReport.month !== monthStr) {
+                await sendRecap('monthly', `📅 MONTHLY RECAP: ${moment().subtract(1, 'months').format('MMMM')}`);
+                STATE.stats.lastReport.month = monthStr;
+                STATE.stats.monthly = {}; // Reset Monthly
+                STATE.saveData();
             }
         }
+        
+        // Save Backup every check (Just in case)
+        if (now.minute() % 5 === 0) STATE.saveData();
+
     }, CONFIG.SYSTEM.DAILY_CHECK_INTERVAL);
 }
 
-async function sendDailyRecap() {
+async function sendRecap(timeframe, title) {
     const channel = client.channels.cache.get(process.env.CHANNEL_ID);
     if (!channel) return;
 
-    const allCalls = Array.from(STATE.dailyStats.values());
-    const sorted = allCalls.sort((a, b) => b.maxGain - a.maxGain).slice(0, 10);
+    const data = STATE.stats[timeframe];
+    const sorted = Object.values(data).sort((a, b) => b.maxGain - a.maxGain).slice(0, 10);
 
     if (sorted.length === 0) return;
 
-    const yesterday = moment().subtract(1, 'days').format('MMMM Do');
-    
-    let description = `**📅 LEADERBOARD: ${yesterday}**\n\n`;
+    let description = `**${title}**\n\n`;
 
     sorted.forEach((coin, index) => {
         let icon = '🟢';
@@ -515,21 +527,21 @@ async function sendDailyRecap() {
 
     const embed = new EmbedBuilder()
         .setColor('#FFD700')
-        .setTitle(`🏆 DAILY TOP PERFORMERS`)
+        .setTitle(`🏆 ${timeframe.toUpperCase()} TOP PERFORMERS`)
         .setDescription(description)
         .setTimestamp()
-        .setFooter({ text: 'Green Chip V8 • Daily Summary' });
+        .setFooter({ text: 'Green Chip V9 • Legacy Tracker' });
 
     try {
         await channel.send({ embeds: [embed] });
-        Utils.log('DAILY', 'Report', 'Sent Daily Recap.');
+        Utils.log('DAILY', 'Report', `Sent ${timeframe} report.`);
     } catch (e) {
-        Utils.log('ERROR', 'Daily', e.message);
+        Utils.log('ERROR', 'Report', e.message);
     }
 }
 
 // ==================================================================================
-//  📈  TRACKER (MCAP GAINS VERSION)
+//  📈  TRACKER
 // ==================================================================================
 
 async function runTracker() {
@@ -554,12 +566,13 @@ async function runTracker() {
             const liq = pair.liquidity?.usd || 0;
             const gain = ((currPrice - data.entry) / data.entry) * 100;
 
-            STATE.updateDailyPeak(addr, gain, 'ACTIVE');
+            // UPDATE PEAKS FOR DAILY/WEEKLY/MONTHLY
+            STATE.updatePeak(addr, gain, 'ACTIVE');
 
             // RUG CHECK
             if (currPrice < (data.entry * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
                 await sendUpdate(data, currMcap, gain, 'RUG');
-                STATE.updateDailyPeak(addr, gain, 'RUG');
+                STATE.updatePeak(addr, gain, 'RUG');
                 STATE.activeTracks.delete(addr);
                 continue;
             }
@@ -596,7 +609,6 @@ async function sendUpdate(data, currentMcap, gain, type) {
         if (type === 'GOD') { color = '#FFD700'; title = `👑 GOD CANDLE: +${gain.toFixed(0)}%`; }
         if (type === 'RUG') { color = '#FF0000'; title = `🚨 STOP LOSS / RUG`; }
 
-        // Use MCAP for display
         const entryStr = Utils.formatUSD(data.entryMcap);
         const currStr = Utils.formatUSD(currentMcap);
 
@@ -605,30 +617,50 @@ async function sendUpdate(data, currentMcap, gain, type) {
             : `**${data.name} ($${data.symbol})**\nEntry: \`${entryStr}\` → Now: \`${currStr}\`\n\n[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`;
 
         const embed = new EmbedBuilder().setColor(color).setTitle(title).setDescription(desc).setTimestamp();
-        
         await msg.reply({ embeds: [embed] });
         
-    } catch (e) { Utils.log('ERROR', 'Tracker', `Reply failed: ${e.message}`); }
+    } catch (e) { }
+}
+
+async function updateSolanaStatus() {
+    try {
+        const res = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112`);
+        const pair = res.data?.pairs?.[0];
+        if (pair) {
+            const price = parseFloat(pair.priceUsd).toFixed(2);
+            const change = pair.priceChange?.h24 || 0;
+            const arrow = change >= 0 ? '▲' : '▼';
+            client.user.setActivity(`SOL: $${price} ${arrow} ${change}%`, { type: ActivityType.Watching });
+        }
+    } catch (e) {}
 }
 
 // ==================================================================================
-//  🔧  COMMANDS & SERVER
+//  🔧  COMMANDS
 // ==================================================================================
 
 client.on('messageCreate', async (m) => {
     if (m.author.bot) return;
     
+    // Check Status
     if (m.content === '!test') {
         const embed = new EmbedBuilder()
             .setColor('#00FF00')
-            .setTitle('🟢 GREEN CHIP V8 - ACTIVE')
+            .setTitle('🟢 GREEN CHIP V9 - ACTIVE')
             .setDescription(`**Time:** ${moment().format('MMMM Do YYYY, h:mm:ss a z')}\n**Tracking:** ${STATE.activeTracks.size} tokens`);
         await m.reply({ embeds: [embed] });
     }
 
-    if (m.content === '!forcereport') {
-        await sendDailyRecap();
-        await m.reply("✅ Forced Daily Report sent.");
+    // Manual Leaderboard (!top, !top week, !top month)
+    if (m.content.startsWith('!top')) {
+        const args = m.content.split(' ');
+        let timeframe = 'daily';
+        let title = '📅 DAILY LEADERBOARD (Live)';
+        
+        if (args[1] === 'week') { timeframe = 'weekly'; title = '📅 WEEKLY LEADERBOARD (Live)'; }
+        if (args[1] === 'month') { timeframe = 'monthly'; title = '📅 MONTHLY LEADERBOARD (Live)'; }
+
+        await sendRecap(timeframe, title);
     }
 });
 
@@ -644,9 +676,8 @@ client.once('ready', () => {
     scanSearch();
     runTracker();
     processQueue();
-    initDailyScheduler();
+    initScheduler();
     
-    // 🆕 Start Status Loop
     updateSolanaStatus(); 
     setInterval(updateSolanaStatus, CONFIG.SYSTEM.STATUS_UPDATE_INTERVAL);
 });
