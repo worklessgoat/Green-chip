@@ -1,6 +1,6 @@
 {
   "name": "green-chip-v8",
-  "version": "8.0.0",
+  "version": "8.1.0",
   "description": "Green Chip V8 Enterprise Trading Engine with Daily Recap and Auto-Trading AI",
   "main": "index.js",
   "scripts": {
@@ -20,7 +20,8 @@
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.1",
     "express": "^4.18.2",
-    "moment": "^2.30.1"
+    "moment": "^2.30.1",
+    "moment-timezone": "^0.5.45"
   },
   "engines": {
     "node": ">=16.9.0"
