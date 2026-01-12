@@ -7,10 +7,11 @@
 //  [3] 🚀 TRI-SOURCE SCANNER: Profiles + Boosts + Search (Simultaneous).
 //  [4] 🤖 AUTO-TRADING AI: Tracks gains, threads replies, and monitors rugs.
 //  [5] 🇺🇸 US TIMEZONE: All times formatted to US EST.
-//  [6] 📱 COMPACT UI: Minimized dead space with copy buttons.
+//  [6] 📱 RICK-STYLE UI: Compact vertical layout with no dead space.
+//  [7] 📈 LIVE STATUS: Bot displays real-time SOL price in status.
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
-//  Version: 8.1.0-COMPACT-UI
+//  Version: 8.2.0-RICK-STYLE
 // ==================================================================================
 
 require('dotenv').config();
@@ -22,11 +23,12 @@ const {
     Partials, 
     ActionRowBuilder, 
     ButtonBuilder, 
-    ButtonStyle 
+    ButtonStyle,
+    MessageFlags // 🆕 Added for the warning fix
 } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
-const moment = require('moment-timezone'); // Ensure 'npm install moment-timezone'
+const moment = require('moment-timezone'); 
 
 // Set Timezone to US (New York / EST)
 moment.tz.setDefault("America/New_York");
@@ -37,7 +39,7 @@ moment.tz.setDefault("America/New_York");
 
 const CONFIG = {
     BOT_NAME: "Green Chip V8",
-    VERSION: "8.1.0-COMPACT",
+    VERSION: "8.2.0-COMPACT",
     
     // --- Strategy Filters ---
     FILTERS: {
@@ -68,7 +70,8 @@ const CONFIG = {
         SCAN_DELAY_SEARCH: 60000,    // Deep Search every 60s
         TRACK_DELAY: 15000,          // Update Prices every 15s
         QUEUE_DELAY: 3000,           // Discord Rate Limit Protection
-        DAILY_CHECK_INTERVAL: 60000  // Check time every minute for Daily Report
+        DAILY_CHECK_INTERVAL: 60000, // Check time every minute for Daily Report
+        STATUS_UPDATE_INTERVAL: 60000 // Update SOL price every 60s
     },
 
     // --- Data Sources ---
@@ -123,7 +126,7 @@ const Utils = {
     log: (type, source, msg) => {
         // Log time in US Timezone
         const t = moment().format('HH:mm:ss');
-        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', FOUND: '💎', DAILY: '📅' };
+        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', FOUND: '💎', DAILY: '📅', STATUS: '📶' };
         console.log(`[${t}] ${icons[type]} [${source}] ${msg}`);
     }
 };
@@ -224,10 +227,10 @@ class RiskEngine {
         }
 
         // Status
-        let status = 'UNKNOWN';
+        let status = 'Unknown Source';
         const dex = (pair.dexId || '').toLowerCase();
-        if (dex.includes('raydium')) status = 'GRADUATED';
-        if (dex.includes('pump')) status = 'PUMP.FUN';
+        if (dex.includes('raydium')) status = 'Raydium';
+        if (dex.includes('pump')) status = 'Pump.Fun';
 
         return { safe, hype, status, vol, liq, fdv };
     }
@@ -311,7 +314,7 @@ function handleErr(source, e) {
 }
 
 // ==================================================================================
-//  💬  DISCORD SENDER (COMPACT UI)
+//  💬  DISCORD SENDER (RICK STYLE - COMPACT UI)
 // ==================================================================================
 
 const client = new Client({
@@ -334,44 +337,62 @@ async function sendAlert(pair, analysis, source) {
     if (!channel) return;
 
     const token = pair.baseToken;
-    const socials = pair.info?.socials || [];
+    const info = pair.info || {};
+    const socials = info.socials || [];
     const dexLink = `https://dexscreener.com/solana/${pair.pairAddress}`;
     
-    // UI Badges
-    let badge = '⚡'; let color = '#FFFFFF';
-    if (source === 'BOOST') { badge = '🚀'; color = '#FFD700'; }
-    if (source === 'PROFILE') { badge = '💎'; color = '#00D4FF'; }
-    if (analysis.status === 'GRADUATED') { badge = '🎓'; color = '#00FF00'; }
-
-    // Minimal Socials
-    const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ') || 'No Socials';
-
-    // Compact Description
-    const age = Utils.getAge(pair.pairCreatedAt);
-    const mcap = Utils.formatUSD(analysis.fdv);
-    const liq = Utils.formatUSD(analysis.liq);
-    const vol = Utils.formatUSD(analysis.vol);
+    // --- 1. Header & Title Construction ---
+    let badge = '⚡'; 
+    if (source === 'BOOST') badge = '🚀';
+    if (source === 'PROFILE') badge = '💎';
     
+    // Format: "💊 Name [MCAP] - SYMBOL/SOL"
+    const mcapShort = Utils.formatUSD(analysis.fdv);
+    const title = `${badge} ${token.name} [${mcapShort}] - ${token.symbol}/SOL`;
+
+    // --- 2. Body Construction (Rick Style - No Dead Space) ---
+    const age = Utils.getAge(pair.pairCreatedAt);
+    const price = parseFloat(pair.priceUsd);
+    const change1h = pair.priceChange?.h1 || 0;
+    
+    // Top Line: Source & Rank (Simulated)
+    let body = `**${analysis.status}** 🔥 \n`;
+
+    // Line 1: USD Price
+    body += `💵 **USD:** \`${Utils.formatPrice(price)}\`\n`;
+
+    // Line 2: FDV (Market Cap)
+    body += `💎 **FDV:** \`${mcapShort}\`\n`;
+
+    // Line 3: Liquidity
+    body += `💧 **Liq:** \`${Utils.formatUSD(analysis.liq)}\`\n`;
+
+    // Line 4: Volume & Age
+    body += `📊 **Vol:** \`${Utils.formatUSD(analysis.vol)}\` • **Age:** \`${age}\`\n`;
+
+    // Line 5: 1H Change
+    const changeEmoji = change1h >= 0 ? '🟢' : '🔴';
+    body += `📈 **1H:** \`${change1h}%\` ${changeEmoji}\n`;
+
+    // --- 3. Conditional Socials Line ---
+    if (socials.length > 0) {
+        const socialLinks = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ');
+        body += `\n🔗 ${socialLinks}`;
+    }
+
+    // --- 4. Embed Assembly ---
     const embed = new EmbedBuilder()
-        .setColor(color)
-        .setTitle(`${badge} ${token.name} ($${token.symbol})`)
+        .setColor(change1h >= 0 ? '#00FF00' : '#FF0000') // Green if up, Red if down
+        .setTitle(title)
         .setURL(dexLink)
-        .setDescription(`**${analysis.status}** • ${links}`)
-        .addFields(
-            { name: '💰 MCAP', value: `\`${mcap}\``, inline: true },
-            { name: '💧 Liq', value: `\`${liq}\``, inline: true },
-            { name: '📊 Vol', value: `\`${vol}\``, inline: true },
-            { name: '⏳ Age', value: `\`${age}\``, inline: true },
-            { name: '🎯 Hype', value: `\`${analysis.hype}/100\``, inline: true },
-            { name: '💵 Price', value: `\`${Utils.formatPrice(parseFloat(pair.priceUsd))}\``, inline: true }
-        )
+        .setDescription(body)
         .setFooter({ text: `${CONFIG.BOT_NAME} • ${moment().format('h:mm A z')}` });
 
-    // Add Icon
-    if (pair.info?.imageUrl) embed.setThumbnail(pair.info.imageUrl);
+    // Add Icon (Profile Pic)
+    if (info.imageUrl) embed.setThumbnail(info.imageUrl);
     
-    // Add Banner (If available)
-    if (pair.info?.header) embed.setImage(pair.info.header);
+    // Add Banner (Header)
+    if (info.header) embed.setImage(info.header);
 
     // Buttons (Copy CA & Buy)
     const row = new ActionRowBuilder().addComponents(
@@ -391,8 +412,8 @@ async function sendAlert(pair, analysis, source) {
         STATE.activeTracks.set(token.address, {
             name: token.name,
             symbol: token.symbol,
-            entry: parseFloat(pair.priceUsd), // Stored for % calc
-            entryMcap: analysis.fdv,          // Stored for display
+            entry: price,
+            entryMcap: analysis.fdv,
             maxGain: 0,
             msgId: msg.id,
             chanId: channel.id,
@@ -408,7 +429,7 @@ async function sendAlert(pair, analysis, source) {
 }
 
 // ==================================================================================
-//  🖱️  INTERACTION HANDLER (BUTTONS)
+//  🖱️  INTERACTION HANDLER (FIXED WARNING)
 // ==================================================================================
 
 client.on('interactionCreate', async interaction => {
@@ -416,12 +437,38 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.customId.startsWith('copy_')) {
         const ca = interaction.customId.split('_')[1];
+        
+        // 🔧 FIXED: Using MessageFlags instead of { ephemeral: true }
         await interaction.reply({ 
             content: `\`${ca}\``, 
-            ephemeral: true 
+            flags: MessageFlags.Ephemeral 
         });
     }
 });
+
+// ==================================================================================
+//  📶  REAL-TIME SOL STATUS (NEW FEATURE)
+// ==================================================================================
+
+async function updateSolanaStatus() {
+    try {
+        // Fetch Wrapped SOL price from DexScreener
+        const res = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112`);
+        const pair = res.data?.pairs?.[0];
+        
+        if (pair) {
+            const price = parseFloat(pair.priceUsd).toFixed(2);
+            const change = pair.priceChange?.h24 || 0;
+            const arrow = change >= 0 ? '▲' : '▼';
+            
+            // Format: "Watching SOL: $150.20 ▲ 2.5%"
+            client.user.setActivity(`SOL: $${price} ${arrow} ${change}%`, { type: ActivityType.Watching });
+            // Utils.log('STATUS', 'System', `Updated Status: SOL $${price}`);
+        }
+    } catch (e) {
+        // Utils.log('WARN', 'Status', 'Failed to fetch SOL price');
+    }
+}
 
 // ==================================================================================
 //  📅  DAILY RECAP SYSTEM
@@ -598,6 +645,10 @@ client.once('ready', () => {
     runTracker();
     processQueue();
     initDailyScheduler();
+    
+    // 🆕 Start Status Loop
+    updateSolanaStatus(); 
+    setInterval(updateSolanaStatus, CONFIG.SYSTEM.STATUS_UPDATE_INTERVAL);
 });
 
 client.login(process.env.DISCORD_TOKEN);
