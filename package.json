@@ -1,14 +1,15 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V8 "COMPACT" - ENTERPRISE TRADING ENGINE
+//  🟢 GREEN CHIP V8 "COMPACT US" - ENTERPRISE TRADING ENGINE
 //  ---------------------------------------------------------------------------------
 //  New Capabilities:
-//  [1] 📏 COMPACT MODE: No empty spaces, small messages.
-//  [2] 🛡️ ANTI-SPAM: Starts at 45%, updates on New Highs.
-//  [3] 🔘 COPY CA BUTTON: One-click copy.
-//  [4] 📈 NEW HIGH TRACKER: "From X Mcap to Y Mcap".
+//  [1] 🇺🇸 US TIMEZONE: Daily Recap set to America/New_York.
+//  [2] 📉 COMPACT UI: Minimized dead space, dense data display.
+//  [3] 📋 COPY CA: Interactive button to grab the Contract Address.
+//  [4] 🖼️ VISUALS: Auto-attaches Banners and Icons if available.
+//  [5] 💰 MCAP TRACKING: Gains are now reported in Market Cap, not Price.
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
-//  Version: 8.4.0-COMPACT-FIXED
+//  Version: 8.1.0-COMPACT
 // ==================================================================================
 
 require('dotenv').config();
@@ -16,52 +17,51 @@ const {
     Client, 
     GatewayIntentBits, 
     EmbedBuilder, 
-    ActivityType,     
-    Partials,         
     ActionRowBuilder, 
-    ButtonBuilder,    
-    ButtonStyle       
+    ButtonBuilder, 
+    ButtonStyle,
+    InteractionType 
 } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
-const moment = require('moment-timezone'); 
-
-// Timezone: United States
-moment.tz.setDefault("America/New_York");
+const moment = require('moment-timezone'); // Ensure 'npm install moment-timezone'
 
 // ==================================================================================
 //  ⚙️  CONFIGURATION MATRIX
 // ==================================================================================
 
 const CONFIG = {
-    BOT_NAME: "Green Chip V8",
-    VERSION: "8.4.0-COMPACT",
+    TIMEZONE: "America/New_York", // US Timezone
     
+    // --- Strategy Filters ---
     FILTERS: {
-        MIN_MCAP: 20000,         
-        MAX_MCAP: 55000,         
-        MIN_LIQ: 1500,           
-        MIN_VOL_H1: 500,         
-        MAX_AGE_MIN: 60,         
-        MIN_AGE_MIN: 1,          
-        REQUIRE_SOCIALS: true,   
-        ANTI_SPAM_NAMES: true    
+        MIN_MCAP: 20000,
+        MAX_MCAP: 55000,
+        MIN_LIQ: 1500,
+        MIN_VOL_H1: 500,
+        MAX_AGE_MIN: 60,
+        MIN_AGE_MIN: 1,
+        REQUIRE_SOCIALS: true,
+        ANTI_SPAM_NAMES: true
     },
 
+    // --- Tracking ---
     TRACKER: {
-        STOP_LOSS: 0.85,         // Stop at -85%
-        RUG_CHECK_LIQ: 300,      
-        MIN_GAIN_START: 45,      // 🟢 Start replying only at +45%
-        MAX_HOURS: 24            
+        GAIN_TRIGGER_1: 45,
+        GAIN_TRIGGER_2: 100,
+        GAIN_TRIGGER_3: 500,
+        STOP_LOSS: 0.90,
+        RUG_CHECK_LIQ: 300,
+        MAX_HOURS: 24
     },
 
     SYSTEM: {
-        SCAN_DELAY_PROFILES: 15000,  
-        SCAN_DELAY_BOOSTS: 30000,    
-        SCAN_DELAY_SEARCH: 60000,    
-        TRACK_DELAY: 15000,          
-        QUEUE_DELAY: 3000,           
-        DAILY_CHECK_INTERVAL: 60000  
+        SCAN_DELAY_PROFILES: 15000,
+        SCAN_DELAY_BOOSTS: 30000,
+        SCAN_DELAY_SEARCH: 60000,
+        TRACK_DELAY: 15000,
+        QUEUE_DELAY: 3000,
+        DAILY_CHECK_INTERVAL: 60000
     },
 
     ENDPOINTS: {
@@ -84,66 +84,48 @@ const Utils = {
     sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
 
     formatUSD: (n) => {
-        if (!n || isNaN(n)) return '$0.00';
+        if (!n || isNaN(n)) return '$0';
         if (n >= 1e9) return '$' + (n/1e9).toFixed(2) + 'B';
         if (n >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
-        if (n >= 1e3) return '$' + (n/1e3).toFixed(2) + 'K';
-        return '$' + n.toFixed(2);
-    },
-
-    formatPrice: (n) => {
-        if (!n || isNaN(n)) return '$0.00';
-        if (n < 0.000001) return '$' + n.toFixed(10);
-        return '$' + n.toFixed(6);
+        if (n >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
+        return '$' + n.toFixed(0);
     },
 
     getAge: (ts) => {
         const diff = Date.now() - ts;
         const m = Math.floor(diff / 60000);
-        if (m < 1) return '🔥 New';
         if (m < 60) return `${m}m`;
         return `${Math.floor(m/60)}h ${m%60}m`;
     },
 
-    getHeaders: () => {
-        return {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'application/json'
-        };
-    },
+    getHeaders: () => ({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json'
+    }),
 
     log: (type, source, msg) => {
-        const t = moment().format('HH:mm:ss');
-        const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', FOUND: '💎', DAILY: '📅' };
-        console.log(`[${t}] ${icons[type]} [${source}] ${msg}`);
+        const t = moment().tz(CONFIG.TIMEZONE).format('HH:mm:ss');
+        console.log(`[${t}] ${type} [${source}] ${msg}`);
     }
 };
 
 // ==================================================================================
-//  🧠  MEMORY & STATE
+//  🧠  STATE MANAGEMENT
 // ==================================================================================
 
 class StateManager {
     constructor() {
-        this.activeTracks = new Map();     
-        this.history = new Set();          
-        this.processing = new Set();       
-        this.queue = [];                   
-        
-        this.dailyStats = new Map();       
-        this.weeklyStats = new Map();
-        this.monthlyStats = new Map();
-
+        this.activeTracks = new Map();
+        this.history = new Set();
+        this.processing = new Set();
+        this.queue = [];
+        this.dailyStats = new Map();
         this.lastReportDate = null;
-        this.lastReportWeek = null;
-        this.lastReportMonth = null;
-        
         this.stats = { calls: 0, rugs: 0, start: Date.now() };
     }
 
     lockCoin(address) {
-        if (this.history.has(address)) return false;    
-        if (this.processing.has(address)) return false; 
+        if (this.history.has(address) || this.processing.has(address)) return false;
         this.processing.add(address);
         return true;
     }
@@ -155,38 +137,21 @@ class StateManager {
     finalizeCoin(address, data) {
         this.processing.delete(address);
         this.history.add(address);
-        
-        const statObj = {
-            name: data.name,
-            symbol: data.symbol,
-            entry: data.price,
-            maxGain: 0,
-            time: Date.now(),
-            status: 'ACTIVE'
-        };
-
-        this.dailyStats.set(address, { ...statObj });
-        this.weeklyStats.set(address, { ...statObj });
-        this.monthlyStats.set(address, { ...statObj });
-
-        if (this.history.size > 10000) {
-            const it = this.history.values();
-            this.history.delete(it.next().value);
-        }
+        this.dailyStats.set(address, {
+            name: data.name, symbol: data.symbol,
+            entry: data.price, maxGain: 0,
+            time: Date.now(), status: 'ACTIVE'
+        });
+        if (this.history.size > 10000) this.history.delete(this.history.values().next().value);
     }
 
-    updatePeak(address, gain, status = 'ACTIVE') {
-        const updateMap = (map) => {
-            if (map.has(address)) {
-                const stat = map.get(address);
-                if (gain > stat.maxGain) stat.maxGain = gain;
-                stat.status = status; 
-                map.set(address, stat);
-            }
-        };
-        updateMap(this.dailyStats);
-        updateMap(this.weeklyStats);
-        updateMap(this.monthlyStats);
+    updateDailyPeak(address, gain, status = 'ACTIVE') {
+        if (this.dailyStats.has(address)) {
+            const stat = this.dailyStats.get(address);
+            if (gain > stat.maxGain) stat.maxGain = gain;
+            stat.status = status;
+            this.dailyStats.set(address, stat);
+        }
     }
 }
 
@@ -204,28 +169,18 @@ class RiskEngine {
         const socials = pair.info?.socials || [];
 
         let hype = 0;
-        const ratio = vol / liq;
-        if (ratio > 0.5) hype += 20;
-        if (ratio > 2.0) hype += 30;
+        if (vol / liq > 0.5) hype += 20;
         if (socials.length > 0) hype += 20;
-        if (pair.info?.header) hype += 10;
-        
+        if (pair.info?.header) hype += 20; // Banner adds score
+
         let safe = true;
-        if (fdv < CONFIG.FILTERS.MIN_MCAP) safe = false;
-        if (fdv > CONFIG.FILTERS.MAX_MCAP) safe = false;
-        if (liq < CONFIG.FILTERS.MIN_LIQ) safe = false;
-        if (vol < CONFIG.FILTERS.MIN_VOL_H1) safe = false;
+        if (fdv < CONFIG.FILTERS.MIN_MCAP || fdv > CONFIG.FILTERS.MAX_MCAP) safe = false;
+        if (liq < CONFIG.FILTERS.MIN_LIQ || vol < CONFIG.FILTERS.MIN_VOL_H1) safe = false;
         if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) safe = false;
         
-        if (CONFIG.FILTERS.ANTI_SPAM_NAMES) {
-            const name = pair.baseToken.name.toLowerCase();
-            if (name.includes('test') || name.length > 20) safe = false;
-        }
-
-        let status = 'UNKNOWN';
-        const dex = (pair.dexId || '').toLowerCase();
-        if (dex.includes('raydium')) status = 'GRADUATED';
-        if (dex.includes('pump')) status = 'PUMP.FUN';
+        let status = 'NEW';
+        if ((pair.dexId || '').includes('pump')) status = 'PUMP';
+        if ((pair.dexId || '').includes('raydium')) status = 'RAY';
 
         return { safe, hype, status, vol, liq, fdv };
     }
@@ -235,52 +190,43 @@ class RiskEngine {
 //  📡  SCANNERS
 // ==================================================================================
 
-async function scanProfiles() {
-    try {
-        const res = await axios.get(CONFIG.ENDPOINTS.PROFILES, { timeout: 5000, headers: Utils.getHeaders() });
-        const profiles = res.data?.filter(p => p.chainId === 'solana').slice(0, 25) || [];
-        if (profiles.length) await fetchAndProcess(profiles.map(p => p.tokenAddress), 'PROFILE');
-    } catch (e) { handleErr('Profiles', e); }
-    setTimeout(scanProfiles, CONFIG.SYSTEM.SCAN_DELAY_PROFILES);
-}
+async function scanProfiles() { await runScan(CONFIG.ENDPOINTS.PROFILES, 'PROFILE', CONFIG.SYSTEM.SCAN_DELAY_PROFILES); }
+async function scanBoosts() { await runScan(CONFIG.ENDPOINTS.BOOSTS, 'BOOST', CONFIG.SYSTEM.SCAN_DELAY_BOOSTS); }
 
-async function scanBoosts() {
+async function runScan(url, source, delay) {
     try {
-        const res = await axios.get(CONFIG.ENDPOINTS.BOOSTS, { timeout: 5000, headers: Utils.getHeaders() });
-        const boosts = res.data?.filter(p => p.chainId === 'solana').slice(0, 25) || [];
-        if (boosts.length) await fetchAndProcess(boosts.map(p => p.tokenAddress), 'BOOST');
-    } catch (e) { handleErr('Boosts', e); }
-    setTimeout(scanBoosts, CONFIG.SYSTEM.SCAN_DELAY_BOOSTS);
+        const res = await axios.get(url, { timeout: 5000, headers: Utils.getHeaders() });
+        const list = res.data?.filter(p => p.chainId === 'solana').slice(0, 20) || [];
+        if (list.length) await fetchAndProcess(list.map(p => p.tokenAddress), source);
+    } catch (e) {}
+    setTimeout(() => runScan(url, source, delay), delay);
 }
 
 async function scanSearch() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.SEARCH, { timeout: 5000, headers: Utils.getHeaders() });
-        const pairs = res.data?.pairs || [];
-        for (const pair of pairs) processPair(pair, 'SEARCH');
-    } catch (e) { handleErr('Search', e); }
+        (res.data?.pairs || []).forEach(p => processPair(p, 'SEARCH'));
+    } catch (e) {}
     setTimeout(scanSearch, CONFIG.SYSTEM.SCAN_DELAY_SEARCH);
 }
 
 async function fetchAndProcess(addresses, source) {
-    if (!addresses || !addresses.length) return;
+    if (!addresses.length) return;
     try {
-        const chunk = addresses.slice(0, 30).join(',');
-        const res = await axios.get(`${CONFIG.ENDPOINTS.TOKENS}${chunk}`, { timeout: 5000, headers: Utils.getHeaders() });
-        const pairs = res.data?.pairs || [];
-        for (const pair of pairs) processPair(pair, source);
-    } catch (e) { handleErr('Fetch', e); }
+        const res = await axios.get(`${CONFIG.ENDPOINTS.TOKENS}${addresses.join(',')}`, { timeout: 5000, headers: Utils.getHeaders() });
+        (res.data?.pairs || []).forEach(p => processPair(p, source));
+    } catch (e) {}
 }
 
 function processPair(pair, source) {
-    if (!pair || !pair.baseToken || pair.chainId !== 'solana') return;
+    if (!pair?.baseToken || pair.chainId !== 'solana') return;
     const addr = pair.baseToken.address;
 
     if (!STATE.lockCoin(addr)) return;
-
     const analysis = RiskEngine.analyze(pair);
+    
+    // Age Check
     const ageMins = (Date.now() - pair.pairCreatedAt) / 60000;
-
     if (ageMins < CONFIG.FILTERS.MIN_AGE_MIN || ageMins > CONFIG.FILTERS.MAX_AGE_MIN || !analysis.safe) {
         STATE.unlockCoin(addr);
         return;
@@ -293,13 +239,11 @@ function processPair(pair, source) {
     });
     
     STATE.queue.push({ pair, analysis, source });
-    Utils.log('FOUND', source, `Queued: ${pair.baseToken.name}`);
+    Utils.log('FOUND', source, `${pair.baseToken.name}`);
 }
 
-function handleErr(source, e) {}
-
 // ==================================================================================
-//  💬  DISCORD SENDER (COMPACT MODE)
+//  💬  DISCORD COMPACT SENDER
 // ==================================================================================
 
 const client = new Client({
@@ -307,11 +251,7 @@ const client = new Client({
 });
 
 async function processQueue() {
-    if (STATE.queue.length === 0) {
-        setTimeout(processQueue, 1000);
-        return;
-    }
-
+    if (STATE.queue.length === 0) { setTimeout(processQueue, 1000); return; }
     const item = STATE.queue.shift();
     await sendAlert(item.pair, item.analysis, item.source);
     setTimeout(processQueue, CONFIG.SYSTEM.QUEUE_DELAY);
@@ -323,31 +263,48 @@ async function sendAlert(pair, analysis, source) {
 
     const token = pair.baseToken;
     const socials = pair.info?.socials || [];
-    const dexLink = `https://dexscreener.com/solana/${pair.pairAddress}`;
     
-    let badge = '⚡'; let color = '#FFFFFF';
-    if (source === 'BOOST') { badge = '🚀'; color = '#FFD700'; }
-    if (source === 'PROFILE') { badge = '💎'; color = '#00D4FF'; }
-    if (analysis.status === 'GRADUATED') { badge = '🎓'; color = '#00FF00'; }
+    // Compact Socials
+    const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' ') || '❌';
+    
+    // Badges
+    let badge = '⚡'; 
+    if (source === 'BOOST') badge = '🚀';
+    if (source === 'PROFILE') badge = '💎';
 
-    const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ') || 'No Socials';
+    // Compact Metrics Line
+    const metrics = `**MCAP:** ${Utils.formatUSD(analysis.fdv)} • **Liq:** ${Utils.formatUSD(analysis.liq)} • **Vol:** ${Utils.formatUSD(analysis.vol)} • **Age:** ${Utils.getAge(pair.pairCreatedAt)}`;
 
-    // 🟢 COMPACT DESCRIPTION: Removed extra newlines and combined fields
+    // Build Embed
     const embed = new EmbedBuilder()
-        .setColor(color)
-        .setTitle(`${badge} ${token.name} ($${token.symbol})`)
-        .setURL(dexLink)
-        .setDescription(`**Src:** ${source} | **Sts:** ${analysis.status}\n${links}\n**CA:** \`${token.address}\`\n**MC:** \`${Utils.formatUSD(analysis.fdv)}\` • **Pr:** \`${Utils.formatPrice(parseFloat(pair.priceUsd))}\`\n**Liq:** \`${Utils.formatUSD(analysis.liq)}\` • **Vol:** \`${Utils.formatUSD(analysis.vol)}\` • **Age:** \`${Utils.getAge(pair.pairCreatedAt)}\`\n**🎯 SCORE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`)
-        .setThumbnail(pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png')
-        .setFooter({ text: `Green Chip V8 • ${moment().format('h:mm A z')}`, iconURL: client.user.displayAvatarURL() });
+        .setColor(source === 'BOOST' ? '#FFD700' : '#00D4FF')
+        .setDescription(`
+${badge} **[${token.name} (${token.symbol})](https://dexscreener.com/solana/${pair.pairAddress})**
+${metrics}
+**Links:** ${links} | **Source:** ${source} | **Score:** ${analysis.hype}/100
+`)
+        .setFooter({ text: `Green Chip V8 • ${moment().tz(CONFIG.TIMEZONE).format('h:mm A')}`, iconURL: client.user.displayAvatarURL() });
 
-    // 🔘 Copy Button
+    // Add Profile Image (Thumbnail)
+    if (pair.info?.imageUrl) {
+        embed.setThumbnail(pair.info.imageUrl);
+    }
+
+    // Add Banner (Main Image)
+    if (pair.info?.header) {
+        embed.setImage(pair.info.header);
+    }
+
+    // Buttons
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setCustomId(`copy_ca_${token.address}`)
-            .setLabel('Copy CA')
-            .setStyle(ButtonStyle.Secondary)
-            .setEmoji('📋')
+            .setCustomId(`copy_${token.address}`)
+            .setLabel('📋 Copy CA')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setLabel('💰 Buy GMGN')
+            .setStyle(ButtonStyle.Link)
+            .setURL(CONFIG.URLS.REFERRAL)
     );
 
     try {
@@ -356,105 +313,90 @@ async function sendAlert(pair, analysis, source) {
         STATE.activeTracks.set(token.address, {
             name: token.name,
             symbol: token.symbol,
-            entry: parseFloat(pair.priceUsd),
-            entryMcap: analysis.fdv, 
+            entryPrice: parseFloat(pair.priceUsd),
+            entryMcap: analysis.fdv, // Store MCAP for gains reporting
             maxGain: 0,
-            lastReportedGain: 0, 
             msgId: msg.id,
             chanId: channel.id,
+            t1: false, t2: false, t3: false,
             start: Date.now()
         });
         
         STATE.stats.calls++;
-        Utils.log('SUCCESS', 'Discord', `Sent Alert: ${token.name}`);
-    } catch (e) {
-        Utils.log('ERROR', 'Discord', e.message);
-    }
+    } catch (e) { console.error(e); }
 }
 
+// 🖱️ Button Interaction Handler (Copy CA)
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
-    if (interaction.customId.startsWith('copy_ca_')) {
-        const ca = interaction.customId.split('copy_ca_')[1];
+    if (interaction.customId.startsWith('copy_')) {
+        const ca = interaction.customId.split('_')[1];
         await interaction.reply({ content: `\`${ca}\``, ephemeral: true });
     }
 });
 
 // ==================================================================================
-//  📅  LEADERBOARDS
+//  📅  US TIMEZONE DAILY RECAP
 // ==================================================================================
 
 function initDailyScheduler() {
     setInterval(async () => {
-        const now = moment(); 
+        // Use moment-timezone for US time
+        const now = moment().tz(CONFIG.TIMEZONE);
+        
+        // 12:00 AM (Midnight) in US Time
         if (now.hour() === 0 && now.minute() === 0) {
             const todayStr = now.format("YYYY-MM-DD");
             
             if (STATE.lastReportDate !== todayStr) {
-                await sendLeaderboard('DAILY', STATE.dailyStats);
+                await sendDailyRecap();
                 STATE.lastReportDate = todayStr;
                 STATE.dailyStats.clear();
-            }
-            if (now.day() === 0 && STATE.lastReportWeek !== todayStr) {
-                await sendLeaderboard('WEEKLY', STATE.weeklyStats);
-                STATE.lastReportWeek = todayStr;
-                STATE.weeklyStats.clear();
-            }
-            if (now.date() === 1 && STATE.lastReportMonth !== todayStr) {
-                await sendLeaderboard('MONTHLY', STATE.monthlyStats);
-                STATE.lastReportMonth = todayStr;
-                STATE.monthlyStats.clear();
             }
         }
     }, CONFIG.SYSTEM.DAILY_CHECK_INTERVAL);
 }
 
-async function sendLeaderboard(type, mapData) {
+async function sendDailyRecap() {
     const channel = client.channels.cache.get(process.env.CHANNEL_ID);
     if (!channel) return;
 
-    const allCalls = Array.from(mapData.values());
-    const sorted = allCalls.sort((a, b) => b.maxGain - a.maxGain).slice(0, 10);
+    const sorted = Array.from(STATE.dailyStats.values())
+        .sort((a, b) => b.maxGain - a.maxGain)
+        .slice(0, 10);
 
-    if (sorted.length === 0) return;
+    if (!sorted.length) return;
 
-    const titleMap = { 'DAILY': `📅 DAILY`, 'WEEKLY': `🔥 WEEKLY`, 'MONTHLY': `👑 MONTHLY` };
-    let description = `**Top Performers (${moment().subtract(1, 'day').format('MMMM Do')}):**\n\n`;
+    const yesterday = moment().tz(CONFIG.TIMEZONE).subtract(1, 'days').format('MMM Do');
+    let desc = `**🇺🇸 DAILY RECAP: ${yesterday}**\n\n`;
 
-    sorted.forEach((coin, index) => {
+    sorted.forEach((c, i) => {
         let icon = '🟢';
-        if (coin.maxGain > 100) icon = '🚀';
-        if (coin.maxGain > 500) icon = '👑';
-        if (coin.status === 'RUG') icon = '💀';
-
-        description += `**#${index + 1} ${icon} ${coin.name} ($${coin.symbol})**\n`;
-        description += `Peak: **+${coin.maxGain.toFixed(0)}%** • ${coin.status}\n`;
+        if (c.maxGain > 100) icon = '🚀';
+        if (c.status === 'RUG') icon = '💀';
+        desc += `\`#${i+1}\` ${icon} **${c.name}** (+${c.maxGain.toFixed(0)}%)\n`;
     });
 
     const embed = new EmbedBuilder()
         .setColor('#FFD700')
-        .setTitle(titleMap[type])
-        .setDescription(description)
-        .setTimestamp();
+        .setTitle(`🏆 TOP PERFORMERS`)
+        .setDescription(desc)
+        .setFooter({ text: 'Green Chip V8 • Daily Summary' });
 
-    try { await channel.send({ embeds: [embed] }); } catch (e) {}
+    await channel.send({ embeds: [embed] });
 }
 
 // ==================================================================================
-//  📈  TRACKER (45% START + NEW HIGHS ONLY)
+//  📈  TRACKER (MCAP BASED)
 // ==================================================================================
 
 async function runTracker() {
-    if (STATE.activeTracks.size === 0) {
-        setTimeout(runTracker, CONFIG.SYSTEM.TRACK_DELAY);
-        return;
-    }
+    if (STATE.activeTracks.size === 0) { setTimeout(runTracker, CONFIG.SYSTEM.TRACK_DELAY); return; }
 
     for (const [addr, data] of STATE.activeTracks) {
         try {
             if (Date.now() - data.start > (CONFIG.TRACKER.MAX_HOURS * 3600000)) {
-                STATE.activeTracks.delete(addr);
-                continue;
+                STATE.activeTracks.delete(addr); continue;
             }
 
             const res = await axios.get(`${CONFIG.ENDPOINTS.TOKENS}${addr}`, { timeout: 3000, headers: Utils.getHeaders() });
@@ -462,29 +404,30 @@ async function runTracker() {
             if (!pair) continue;
 
             const currPrice = parseFloat(pair.priceUsd);
-            const currMcap = pair.fdv || pair.marketCap;
+            const currMcap = pair.fdv || pair.marketCap || 0;
             const liq = pair.liquidity?.usd || 0;
-            const gain = ((currPrice - data.entry) / data.entry) * 100;
+            
+            // Gain calculation
+            const gain = ((currPrice - data.entryPrice) / data.entryPrice) * 100;
 
-            STATE.updatePeak(addr, gain, 'ACTIVE');
+            STATE.updateDailyPeak(addr, gain, 'ACTIVE');
 
-            // 🛑 STOP LOSS (-85%)
-            if (gain <= -(CONFIG.TRACKER.STOP_LOSS * 100) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
-                await sendUpdate(data, currPrice, gain, 'RUG', currMcap);
-                STATE.updatePeak(addr, gain, 'RUG');
-                STATE.activeTracks.delete(addr); 
+            // Rug Check
+            if (currPrice < (data.entryPrice * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
+                await sendUpdate(data, currMcap, gain, 'RUG');
+                STATE.updateDailyPeak(addr, gain, 'RUG');
+                STATE.activeTracks.delete(addr);
                 continue;
             }
 
-            // 🚀 NEW HIGH CHECK
-            if (gain > data.lastReportedGain) {
-                
-                // 🟢 START ALERTING AT 45% (Configurable)
-                if (gain >= CONFIG.TRACKER.MIN_GAIN_START) {
-                    await sendUpdate(data, currPrice, gain, 'GAIN', currMcap);
-                    data.lastReportedGain = gain; 
-                    if (gain > data.maxGain) data.maxGain = gain;
-                }
+            if (gain > data.maxGain) data.maxGain = gain;
+
+            if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_1 && !data.t1) {
+                await sendUpdate(data, currMcap, gain, 'GAIN'); data.t1 = true;
+            } else if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_2 && !data.t2) {
+                await sendUpdate(data, currMcap, gain, 'MOON'); data.t2 = true;
+            } else if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_3 && !data.t3) {
+                await sendUpdate(data, currMcap, gain, 'GOD'); data.t3 = true;
             }
 
         } catch (e) {}
@@ -493,66 +436,36 @@ async function runTracker() {
     setTimeout(runTracker, CONFIG.SYSTEM.TRACK_DELAY);
 }
 
-async function sendUpdate(data, price, gain, type, currentMcap) {
+async function sendUpdate(data, currentMcap, gain, type) {
     const channel = client.channels.cache.get(data.chanId);
     if (!channel) return;
     try {
         const msg = await channel.messages.fetch(data.msgId);
         if (!msg) return;
 
-        let color = '#00FF00'; 
-        let text = '';
+        let color = '#00FF00'; let title = `🚀 ${gain.toFixed(0)}%`;
+        if (type === 'MOON') { color = '#00D4FF'; title = `🌕 ${gain.toFixed(0)}%`; }
+        if (type === 'RUG') { color = '#FF0000'; title = `🚨 RUG`; }
 
-        if (type === 'RUG') {
-            color = '#FF0000'; 
-            text = `🚨 **STOPPED:** Token hit -85% or Rugged.`;
-        } else {
-            // Mcap Format
-            if (gain > 200) { 
-                 text = `🚀 **${gain.toFixed(0)}% gained** from \`${Utils.formatUSD(data.entryMcap)}\` market cap to \`${Utils.formatUSD(currentMcap)}\` market cap`;
-                 color = '#FFD700'; 
-            } else {
-                 text = `🟢 **${gain.toFixed(0)}% gained**`;
-            }
-        }
+        // COMPACT MCAP UPDATE
+        const entryStr = Utils.formatUSD(data.entryMcap);
+        const currStr = Utils.formatUSD(currentMcap);
+        
+        const desc = type === 'RUG' 
+            ? `💀 **Stopped Tracking** (Liquidity pulled or -90%)`
+            : `**${data.name}:** ${entryStr} ➔ **${currStr}**\n[**💰 SELL**](${CONFIG.URLS.REFERRAL})`;
 
-        const embed = new EmbedBuilder()
-            .setColor(color)
-            .setDescription(`${text}\n[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`)
-            .setTimestamp();
-
+        const embed = new EmbedBuilder().setColor(color).setTitle(title).setDescription(desc);
         await msg.reply({ embeds: [embed] });
         
-    } catch (e) { Utils.log('ERROR', 'Tracker', `Reply failed: ${e.message}`); }
+    } catch (e) { console.log(e.message); }
 }
 
-// ==================================================================================
-//  🔧  SERVER
-// ==================================================================================
-
-client.on('messageCreate', async (m) => {
-    if (m.author.bot) return;
-    if (m.content === '!test') {
-        await m.reply({ content: `🟢 System Online • US Time: ${moment().format('h:mm A z')}` });
-    }
-    if (m.content === '!forcereport') {
-        await sendLeaderboard('DAILY', STATE.dailyStats);
-        await m.reply("✅ Report sent.");
-    }
-});
-
-const app = express();
-app.get('/', (req, res) => res.json({ status: 'ONLINE', version: CONFIG.VERSION }));
-app.listen(process.env.PORT || 3000);
-
+// Start
 client.once('ready', () => {
-    Utils.log('SUCCESS', 'System', `Logged in as ${client.user.tag}`);
-    scanProfiles();
-    scanBoosts();
-    scanSearch();
-    runTracker();
-    processQueue();
-    initDailyScheduler();
+    Utils.log('SUCCESS', 'System', `Online as ${client.user.tag}`);
+    scanProfiles(); scanBoosts(); scanSearch();
+    runTracker(); processQueue(); initDailyScheduler();
 });
 
 client.login(process.env.DISCORD_TOKEN);
