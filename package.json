@@ -8,7 +8,7 @@
 //  [4] 📊 MCAP COMPARE: Shows "From X Mcap to Y Mcap" in gains.
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
-//  Version: 8.2.0-STRICT-FIX
+//  Version: 8.2.1-FIXED-IMPORTS
 // ==================================================================================
 
 require('dotenv').config();
@@ -16,13 +16,15 @@ const {
     Client, 
     GatewayIntentBits, 
     EmbedBuilder, 
-    ActionRowBuilder, 
-    ButtonBuilder, 
-    ButtonStyle 
+    ActivityType,     // RESTORED
+    Partials,         // RESTORED
+    ActionRowBuilder, // Added for buttons
+    ButtonBuilder,    // Added for buttons
+    ButtonStyle       // Added for buttons
 } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
-const moment = require('moment-timezone'); 
+const moment = require('moment-timezone'); // Ensure 'npm install moment-timezone'
 
 // Set Global Timezone to US (Eastern Time)
 moment.tz.setDefault("America/New_York");
@@ -33,7 +35,7 @@ moment.tz.setDefault("America/New_York");
 
 const CONFIG = {
     BOT_NAME: "Green Chip V8",
-    VERSION: "8.2.0-STABLE",
+    VERSION: "8.2.1-STABLE",
     
     // --- Strategy Filters ---
     FILTERS: {
