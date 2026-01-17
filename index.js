@@ -1,11 +1,11 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V8.4 - NO GAPS EDITION
+//  🟢 GREEN CHIP V8.5 - LEADERBOARD & COMPACT EDITION
 //  ---------------------------------------------------------------------------------
-//  [1] 🚫 NO SPACES: TIGHTENED UI (Removed extra gaps/newlines).
+//  [1] 🚫 NO SPACES: TIGHTENED UI (Zero extra gaps).
 //  [2] 🏆 LEADERBOARDS: Daily (10), Weekly (15), Monthly (20).
-//  [3] 🖼️ BANNERS & PHOTOS: Kept exactly as requested.
-//  [4] 📋 COPY CA: Kept button.
-//  [5] 📈 TRACKER: Market Cap based gains + Peak detection.
+//  [3] 📢 CHANNEL: Leaderboards sent only to 1459729982459871252.
+//  [4] 🖼️ VISUALS: Banners & Photos preserved exactly.
+//  [5] 📈 TRACKER: Market Cap gains + Auto-Recap logic.
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
 // ==================================================================================
@@ -25,7 +25,7 @@ moment.tz.setDefault("America/New_York");
 
 const CONFIG = {
     BOT_NAME: "Green Chip V8",
-    VERSION: "8.4.0-COMPACT",
+    VERSION: "8.5.0-LEADERBOARD",
     
     // --- Strategy Filters ---
     FILTERS: {
@@ -73,8 +73,8 @@ const CONFIG = {
 
     // --- Channels ---
     CHANNELS: {
-        ALERTS: process.env.CHANNEL_ID, 
-        LEADERBOARD: "1459729982459871252" 
+        ALERTS: process.env.CHANNEL_ID, // Standard alerts
+        LEADERBOARD: "1459729982459871252" // 🏆 Highest Gains Channel
     }
 };
 
@@ -132,6 +132,7 @@ class StateManager {
         this.processing = new Set();       
         this.queue = [];                   
         
+        // 🆕 EXPANDED MEMORY FOR LEADERBOARDS
         this.dailyStats = new Map();       
         this.weeklyStats = new Map();
         this.monthlyStats = new Map();
@@ -167,6 +168,7 @@ class StateManager {
             status: 'ACTIVE'
         };
 
+        // Add to all tracking maps
         this.dailyStats.set(address, { ...statEntry });
         this.weeklyStats.set(address, { ...statEntry });
         this.monthlyStats.set(address, { ...statEntry });
@@ -177,6 +179,7 @@ class StateManager {
         }
     }
 
+    // Updates Peak Gain in ALL memory banks (Daily, Weekly, Monthly)
     updatePeak(address, gain, status = 'ACTIVE') {
         const updateMap = (map) => {
             if (map.has(address)) {
@@ -390,7 +393,7 @@ async function sendAlert(pair, analysis, source) {
 }
 
 // ==================================================================================
-//  📅  LEADERBOARD SYSTEM (Specific Channel)
+//  📅  LEADERBOARD SYSTEM (Daily 10, Weekly 15, Monthly 20)
 // ==================================================================================
 
 function initScheduler() {
@@ -398,23 +401,24 @@ function initScheduler() {
         const now = moment();
         const dateStr = now.format("YYYY-MM-DD");
         
+        // 12:00 AM Midnight EST Check
         if (now.hour() === 0 && now.minute() === 0) {
             
-            // DAILY (Top 10)
+            // --- DAILY RECAP (Top 10) ---
             if (STATE.lastDailyReport !== dateStr) {
                 await sendLeaderboard('DAILY', STATE.dailyStats, 10);
                 STATE.lastDailyReport = dateStr;
                 STATE.dailyStats.clear();
             }
 
-            // WEEKLY (Top 15)
+            // --- WEEKLY RECAP (Top 15) - Mondays ---
             if (now.day() === 1 && STATE.lastWeeklyReport !== dateStr) {
                 await sendLeaderboard('WEEKLY', STATE.weeklyStats, 15);
                 STATE.lastWeeklyReport = dateStr;
                 STATE.weeklyStats.clear();
             }
 
-            // MONTHLY (Top 20)
+            // --- MONTHLY RECAP (Top 20) - 1st of Month ---
             if (now.date() === 1 && STATE.lastMonthlyReport !== dateStr) {
                 await sendLeaderboard('MONTHLY', STATE.monthlyStats, 20);
                 STATE.lastMonthlyReport = dateStr;
@@ -425,7 +429,7 @@ function initScheduler() {
 }
 
 async function sendLeaderboard(type, statMap, limit) {
-    const channel = client.channels.cache.get(CONFIG.CHANNELS.LEADERBOARD); // Specific channel
+    const channel = client.channels.cache.get(CONFIG.CHANNELS.LEADERBOARD); // 🏆 Specific Channel
     if (!channel) return;
 
     const allCalls = Array.from(statMap.values());
@@ -455,7 +459,7 @@ async function sendLeaderboard(type, statMap, limit) {
 
     try {
         await channel.send({ embeds: [embed] });
-        Utils.log('DAILY', 'Leaderboard', `Sent ${type} report.`);
+        Utils.log('DAILY', 'Leaderboard', `Sent ${type} report to Leaderboard Channel.`);
     } catch (e) {
         Utils.log('ERROR', 'Leaderboard', e.message);
     }
@@ -487,6 +491,8 @@ async function runTracker() {
             const liq = pair.liquidity?.usd || 0;
 
             const gain = ((currMcap - data.entryMcap) / data.entryMcap) * 100;
+            
+            // 🧠 Update ALL Leaderboard Memories
             STATE.updatePeak(addr, gain, 'ACTIVE');
 
             if (currPrice < (data.entryPrice * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
@@ -528,10 +534,8 @@ async function sendUpdate(data, currentMcap, gain, type) {
         const bannerText = `GAIN +${gain.toFixed(0)}% | ${Utils.formatUSD(currentMcap)}`;
         const bannerUrl = `https://placehold.co/600x200/00b140/ffffff/png?text=${encodeURIComponent(bannerText)}&font=roboto`;
 
-        const desc = `**${data.name} ($${data.symbol})**\n` +
-            `Entry: \`${Utils.formatUSD(data.entryMcap)}\`\n` +
-            `Current: \`${Utils.formatUSD(currentMcap)}\`\n` +
-            `[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`;
+        // 🟢 COMPACT GAINS DESCRIPTION
+        const desc = `**${data.name} ($${data.symbol})**\nEntry: \`${Utils.formatUSD(data.entryMcap)}\`\nCurrent: \`${Utils.formatUSD(currentMcap)}\`\n[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`;
 
         const embed = new EmbedBuilder()
             .setColor(color)
