@@ -1,12 +1,12 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V8.1 - US EDITION (PERMANENT IMAGE FIX)
+//  🟢 GREEN CHIP V8.2 - COMPACT CARD EDITION
 //  ---------------------------------------------------------------------------------
 //  New Capabilities:
-//  [1] 📅 LEADERBOARDS: Daily, Weekly, and Monthly Auto-Recaps.
-//  [2] 🎨 DYNAMIC UI: Risk-based colors & Banner support.
-//  [3] 📋 COPY CA: One-click button to copy Contract Address.
-//  [4] 📈 REAL GAINS: Market Cap based calculations & Peak detection.
-//  [5] 🖼️ PERMANENT IMAGE: Uses a stable URL for gains alerts.
+//  [1] 🖼️ COMPACT GAINS: Uses a "Banner Style" image for the "Small Space" look.
+//  [2] 📅 LEADERBOARDS: Daily, Weekly, and Monthly Auto-Recaps.
+//  [3] 🎨 DYNAMIC UI: Risk-based colors & Banner support.
+//  [4] 📋 COPY CA: One-click button to copy Contract Address.
+//  [5] 📈 REAL GAINS: Market Cap based calculations & Peak detection.
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
 // ==================================================================================
@@ -26,13 +26,13 @@ moment.tz.setDefault("America/New_York");
 
 const CONFIG = {
     BOT_NAME: "Green Chip V8",
-    VERSION: "8.1.0-US",
+    VERSION: "8.2.0-COMPACT",
     
     // --- Strategy Filters ---
     FILTERS: {
         MIN_MCAP: 20000,         // $20k Minimum
-        MAX_MCAP: 75000,         // Increased slightly for quality check
-        MIN_LIQ: 1500,           // Liquidity Floor
+        MAX_MCAP: 75000,         
+        MIN_LIQ: 1500,           
         MIN_VOL_H1: 500,         
         MAX_AGE_MIN: 60,         
         MIN_AGE_MIN: 1,          
@@ -45,8 +45,8 @@ const CONFIG = {
         GAIN_TRIGGER_1: 45,      // +45% Gain
         GAIN_TRIGGER_2: 100,     // +100% Gain
         GAIN_TRIGGER_3: 500,     // +500% Gain
-        STOP_LOSS: 0.90,         // Silent Stop Loss
-        RUG_CHECK_LIQ: 300,      // Silent Rug Check
+        STOP_LOSS: 0.90,         
+        RUG_CHECK_LIQ: 300,      
         MAX_HOURS: 24            
     },
 
@@ -110,7 +110,7 @@ const Utils = {
     },
 
     log: (type, source, msg) => {
-        const t = moment().format('h:mm:ss A'); // US Time Format
+        const t = moment().format('h:mm:ss A'); 
         const icons = { INFO: 'ℹ️', SUCCESS: '✅', WARN: '⚠️', ERROR: '❌', FOUND: '💎', DAILY: '📅' };
         console.log(`[${t}] ${icons[type]} [${source}] ${msg}`);
     }
@@ -127,7 +127,6 @@ class StateManager {
         this.processing = new Set();       
         this.queue = [];                   
         
-        // 🆕 EXPANDED LEADERBOARDS
         this.dailyStats = new Map();       
         this.weeklyStats = new Map();
         this.monthlyStats = new Map();
@@ -157,7 +156,7 @@ class StateManager {
         const statEntry = {
             name: data.name,
             symbol: data.symbol,
-            entryMcap: data.mcap, // Using MCAP
+            entryMcap: data.mcap, 
             maxGain: 0,
             time: Date.now(),
             status: 'ACTIVE'
@@ -173,7 +172,6 @@ class StateManager {
         }
     }
 
-    // Updates Peak Gain in all leaderboards
     updatePeak(address, gain, status = 'ACTIVE') {
         const updateMap = (map) => {
             if (map.has(address)) {
@@ -203,7 +201,6 @@ class RiskEngine {
         const fdv = pair.fdv || pair.marketCap || 0;
         const socials = pair.info?.socials || [];
 
-        // Hype Score
         let hype = 0;
         const ratio = vol / liq;
         if (ratio > 0.5) hype += 20;
@@ -211,7 +208,6 @@ class RiskEngine {
         if (socials.length > 0) hype += 20;
         if (pair.info?.header) hype += 10;
         
-        // Safety Checks
         let safe = true;
         if (fdv < CONFIG.FILTERS.MIN_MCAP) safe = false;
         if (fdv > CONFIG.FILTERS.MAX_MCAP) safe = false;
@@ -224,22 +220,19 @@ class RiskEngine {
             if (name.includes('test') || name.length > 20) safe = false;
         }
 
-        // --- NEW: Risk Colors ---
-        let riskLevel = 'YELLOW'; // Default Balanced
-        let color = '#FFFF00'; // Yellow
+        // --- Risk Colors ---
+        let riskLevel = 'YELLOW'; 
+        let color = '#FFFF00'; 
 
-        // Red if Liquidty is low or MCAP is very low
         if (liq < 4000 || fdv < 25000) {
             riskLevel = 'RED';
-            color = '#FF0000'; // Red
+            color = '#FF0000'; 
         } 
-        // Green if Liquidty is high, MCAP is healthy, and has socials
         else if (liq > 8000 && fdv > 40000 && socials.length > 0) {
             riskLevel = 'GREEN';
-            color = '#00FF00'; // Green
+            color = '#00FF00'; 
         }
 
-        // Status
         let status = 'UNKNOWN';
         const dex = (pair.dexId || '').toLowerCase();
         if (dex.includes('raydium')) status = 'GRADUATED';
@@ -304,7 +297,6 @@ function processPair(pair, source) {
         return;
     }
 
-    // Save MCAP for tracking
     STATE.finalizeCoin(addr, { 
         name: pair.baseToken.name, 
         symbol: pair.baseToken.symbol, 
@@ -319,7 +311,7 @@ function processPair(pair, source) {
 function handleErr(source, e) {}
 
 // ==================================================================================
-//  💬  DISCORD SENDER (NEW UI)
+//  💬  DISCORD SENDER
 // ==================================================================================
 
 const client = new Client({
@@ -345,10 +337,9 @@ async function sendAlert(pair, analysis, source) {
     const socials = pair.info?.socials || [];
     const dexLink = `https://dexscreener.com/solana/${pair.pairAddress}`;
     
-    // Links & Images
     const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ') || '⚠️ No Socials';
-    const banner = pair.info?.header || null; // Banner
-    const icon = pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png'; // Icon
+    const banner = pair.info?.header || null; 
+    const icon = pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
 
     const embed = new EmbedBuilder()
         .setColor(analysis.color) // 🔴 🟡 🟢 Dynamic Color
@@ -359,22 +350,20 @@ async function sendAlert(pair, analysis, source) {
 
 ${links}
 
-> **📊 MARKET DATA**
+> **📊 DATA**
 > • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`
 > • **Liquidity:** \`${Utils.formatUSD(analysis.liq)}\`
-> • **Volume (1h):** \`${Utils.formatUSD(analysis.vol)}\`
-> • **Age:** \`${Utils.getAge(pair.pairCreatedAt)}\`
+> • **Volume:** \`${Utils.formatUSD(analysis.vol)}\`
 
-**🎯 HYPE SCORE: ${analysis.hype}/100**
+**🎯 HYPE: ${analysis.hype}/100**
 ${analysis.hype > 40 ? "🔥 HIGH MOMENTUM" : "✅ STEADY"}
 
-[**🛒 BUY ON GMGN (LOWER FEES)**](${CONFIG.URLS.REFERRAL})
+[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})
 `)
-        .setThumbnail(icon) // Icon is thumbnail
-        .setImage(banner) // Banner is big image (if available)
+        .setThumbnail(icon)
+        .setImage(banner) 
         .setFooter({ text: `Green Chip V8 • ${moment().format('h:mm A')} EST`, iconURL: client.user.displayAvatarURL() });
 
-    // 📋 COPY CA BUTTON
     const row = new ActionRowBuilder()
         .addComponents(
             new ButtonBuilder()
@@ -389,7 +378,7 @@ ${analysis.hype > 40 ? "🔥 HIGH MOMENTUM" : "✅ STEADY"}
         STATE.activeTracks.set(token.address, {
             name: token.name,
             symbol: token.symbol,
-            entryMcap: analysis.fdv, // Track MCAP
+            entryMcap: analysis.fdv, 
             entryPrice: parseFloat(pair.priceUsd),
             maxGain: 0,
             msgId: msg.id,
@@ -406,7 +395,7 @@ ${analysis.hype > 40 ? "🔥 HIGH MOMENTUM" : "✅ STEADY"}
 }
 
 // ==================================================================================
-//  📅  LEADERBOARD SYSTEM (DAILY, WEEKLY, MONTHLY)
+//  📅  LEADERBOARD SYSTEM
 // ==================================================================================
 
 function initScheduler() {
@@ -414,24 +403,20 @@ function initScheduler() {
         const now = moment();
         const dateStr = now.format("YYYY-MM-DD");
         
-        // 12:00 AM Midnight EST Check
         if (now.hour() === 0 && now.minute() === 0) {
             
-            // DAILY REPORT
             if (STATE.lastDailyReport !== dateStr) {
                 await sendLeaderboard('DAILY', STATE.dailyStats);
                 STATE.lastDailyReport = dateStr;
                 STATE.dailyStats.clear();
             }
 
-            // WEEKLY REPORT (Monday)
             if (now.day() === 1 && STATE.lastWeeklyReport !== dateStr) {
                 await sendLeaderboard('WEEKLY', STATE.weeklyStats);
                 STATE.lastWeeklyReport = dateStr;
                 STATE.weeklyStats.clear();
             }
 
-            // MONTHLY REPORT (1st of Month)
             if (now.date() === 1 && STATE.lastMonthlyReport !== dateStr) {
                 await sendLeaderboard('MONTHLY', STATE.monthlyStats);
                 STATE.lastMonthlyReport = dateStr;
@@ -474,7 +459,7 @@ async function sendLeaderboard(type, statMap) {
 }
 
 // ==================================================================================
-//  📈  TRACKER (MCAP BASED)
+//  📈  TRACKER (COMPACT GAINS CARD)
 // ==================================================================================
 
 async function runTracker() {
@@ -498,20 +483,15 @@ async function runTracker() {
             const currMcap = pair.fdv || pair.marketCap;
             const liq = pair.liquidity?.usd || 0;
 
-            // GAIN CALCULATION: MCAP BASED
             const gain = ((currMcap - data.entryMcap) / data.entryMcap) * 100;
-
-            // Update Peak for Leaderboards
             STATE.updatePeak(addr, gain, 'ACTIVE');
 
-            // SILENT RUG REMOVAL (No Notification)
             if (currPrice < (data.entryPrice * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
                 STATE.updatePeak(addr, gain, 'RUG');
                 STATE.activeTracks.delete(addr);
                 continue;
             }
 
-            // High Score & Alerts
             if (gain > data.maxGain) data.maxGain = gain;
 
             if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_1 && !data.t1) {
@@ -539,22 +519,24 @@ async function sendUpdate(data, currentMcap, gain, type) {
         if (!msg) return;
 
         let color = '#00FF00'; let title = `🚀 GAIN: +${gain.toFixed(0)}%`;
-
         if (type === 'MOON') { color = '#00D4FF'; title = `🌕 MOONSHOT: +${gain.toFixed(0)}%`; }
         if (type === 'GOD') { color = '#FFD700'; title = `👑 GOD CANDLE: +${gain.toFixed(0)}%`; }
 
+        // Use Placehold.co to create a perfectly sized "Banner" (600x200)
+        // This forces Discord to render it as a small card at the bottom.
+        const bannerText = `GAIN +${gain.toFixed(0)}% | ${Utils.formatUSD(currentMcap)}`;
+        const bannerUrl = `https://placehold.co/600x200/00b140/ffffff/png?text=${encodeURIComponent(bannerText)}&font=roboto`;
+
         const desc = `**${data.name} ($${data.symbol})**\n` +
-            `Entry MCAP: \`${Utils.formatUSD(data.entryMcap)}\`\n` +
-            `Current MCAP: \`${Utils.formatUSD(currentMcap)}\`\n` +
-            `**Peak Gain: +${data.maxGain.toFixed(0)}%**\n\n` +
+            `Entry: \`${Utils.formatUSD(data.entryMcap)}\`\n` +
+            `Current: \`${Utils.formatUSD(currentMcap)}\`\n` +
             `[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`;
 
         const embed = new EmbedBuilder()
             .setColor(color)
             .setTitle(title)
             .setDescription(desc)
-            // 👇 PERMANENT LINK - Replace with your own Imgur link if you want the custom design!
-            .setImage('https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Green_Arrow_Up.svg/1024px-Green_Arrow_Up.svg.png')
+            .setImage(bannerUrl) // 👈 THIS IS THE SMALL SPACE IMAGE
             .setTimestamp();
             
         await msg.reply({ embeds: [embed] });
@@ -569,7 +551,6 @@ async function sendUpdate(data, currentMcap, gain, type) {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
-    // Copy CA Handler
     if (interaction.customId.startsWith('copy_')) {
         const ca = interaction.customId.split('_')[1];
         await interaction.reply({ 
