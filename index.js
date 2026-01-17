@@ -17,7 +17,7 @@ require(‘dotenv’).config();
 const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require(‘discord.js’);
 const axios = require(‘axios’);
 const express = require(‘express’);
-const moment = require(‘moment-timezone’); // Ensure ‘npm install moment-timezone’ is run
+const moment = require(‘moment-timezone’);
 
 // ==================================================================================
 //  ⚙️  CONFIGURATION MATRIX
@@ -26,42 +26,39 @@ const moment = require(‘moment-timezone’); // Ensure ‘npm install moment-t
 const CONFIG = {
 BOT_NAME: “Green Chip V8”,
 VERSION: “8.1.0-ENHANCED”,
-TIMEZONE: “America/New_York”, // US Eastern Time
+TIMEZONE: “America/New_York”,
 
 ```
-// --- Strategy Filters ---
 FILTERS: {
-    MIN_MCAP: 20000,         // $20k Minimum (Entry Zone)
-    MAX_MCAP: 55000,         // $55k Maximum (Moonshot Zone)
-    MIN_LIQ: 1500,           // Liquidity Floor
-    MIN_VOL_H1: 500,         // Momentum Check
-    MAX_AGE_MIN: 60,         // Only Fresh Coins (<1 Hour)
-    MIN_AGE_MIN: 1,          // Anti-Flashbot Buffer (>1 Minute)
-    REQUIRE_SOCIALS: true,   // Filters out 99% of rugs
-    ANTI_SPAM_NAMES: true    // Blocks "ELONCUMxxx" type names
+    MIN_MCAP: 20000,
+    MAX_MCAP: 55000,
+    MIN_LIQ: 1500,
+    MIN_VOL_H1: 500,
+    MAX_AGE_MIN: 60,
+    MIN_AGE_MIN: 1,
+    REQUIRE_SOCIALS: true,
+    ANTI_SPAM_NAMES: true
 },
 
-// --- Tracking & Auto-Trading Logic ---
 TRACKER: {
-    GAIN_TRIGGER_1: 45,      // First Alert at +45% (Reply to thread)
-    GAIN_TRIGGER_2: 100,     // Moon Alert at +100%
-    GAIN_TRIGGER_3: 500,     // God Alert at +500%
-    STOP_LOSS: 0.90,         // Hard Stop if drops 90% from entry
-    RUG_CHECK_LIQ: 300,      // If liq < $300, it's a rug
-    MAX_HOURS: 24            // Drop tracking after 24h
+    GAIN_TRIGGER_1: 45,
+    GAIN_TRIGGER_2: 100,
+    GAIN_TRIGGER_3: 500,
+    STOP_LOSS: 0.90,
+    RUG_CHECK_LIQ: 300,
+    MAX_HOURS: 24
 },
 
-// --- System Intervals ---
 SYSTEM: {
-    SCAN_DELAY_PROFILES: 15000,  // Check Profiles every 15s
-    SCAN_DELAY_BOOSTS: 30000,    // Check Trending/Boosts every 30s
-    SCAN_DELAY_SEARCH: 60000,    // Deep Search every 60s
-    TRACK_DELAY: 15000,          // Update Prices every 15s
-    QUEUE_DELAY: 3000,           // Discord Rate Limit Protection
-    DAILY_CHECK_INTERVAL: 60000  // Check time every minute for Reports
+    SCAN_DELAY_PROFILES: 15000,
+    SCAN_DELAY_BOOSTS: 30000,
+    SCAN_DELAY_SEARCH: 60000,
+    TRACK_DELAY: 15000,
+    QUEUE_DELAY: 3000,
+    DAILY_CHECK_INTERVAL: 60000,
+    STARTUP_DELAY: 10000
 },
 
-// --- Data Sources ---
 ENDPOINTS: {
     PROFILES: "https://api.dexscreener.com/token-profiles/latest/v1",
     BOOSTS: "https://api.dexscreener.com/token-boosts/latest/v1",
@@ -112,7 +109,7 @@ getUSTime: () => {
 
 getHeaders: () => {
     return {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json'
     };
 },
@@ -123,37 +120,30 @@ log: (type, source, msg) => {
     console.log(`[${t}] ${icons[type]} [${source}] ${msg}`);
 },
 
-// Calculate exact market cap based gains
 calculateMCapGain: (entryMcap, currentMcap) => {
     if (!entryMcap || !currentMcap) return 0;
     return ((currentMcap - entryMcap) / entryMcap) * 100;
 },
 
-// Determine risk color based on analysis
 getRiskColor: (analysis) => {
     let riskScore = 0;
     
-    // Low liquidity = risky
     if (analysis.liq < 3000) riskScore += 3;
     else if (analysis.liq < 8000) riskScore += 2;
     else riskScore += 1;
     
-    // No socials = risky
     if (!analysis.hasSocials) riskScore += 2;
     
-    // High volume/liq ratio = risky
     const ratio = analysis.vol / analysis.liq;
     if (ratio > 2.0) riskScore += 2;
     else if (ratio > 1.0) riskScore += 1;
     
-    // Age matters
     if (analysis.ageMinutes < 5) riskScore += 2;
     else if (analysis.ageMinutes < 15) riskScore += 1;
     
-    // Determine color
-    if (riskScore >= 6) return '#FF4444'; // Red - High Risk
-    if (riskScore >= 4) return '#FFAA00'; // Yellow - Medium Risk
-    return '#00FF88'; // Green - Low Risk
+    if (riskScore >= 6) return '#FF4444';
+    if (riskScore >= 4) return '#FFAA00';
+    return '#00FF88';
 }
 ```
 
@@ -171,7 +161,6 @@ this.processing = new Set();
 this.queue = [];
 
 ```
-    // Enhanced tracking for leaderboards
     this.dailyStats = new Map();
     this.weeklyStats = new Map();
     this.monthlyStats = new Map();
@@ -209,9 +198,9 @@ finalizeCoin(address, data) {
         status: 'ACTIVE'
     };
     
-    this.dailyStats.set(address, coinData);
-    this.weeklyStats.set(address, coinData);
-    this.monthlyStats.set(address, coinData);
+    this.dailyStats.set(address, {...coinData});
+    this.weeklyStats.set(address, {...coinData});
+    this.monthlyStats.set(address, {...coinData});
 
     if (this.history.size > 10000) {
         const it = this.history.values();
@@ -370,7 +359,11 @@ if (!e.response || e.response.status !== 429) {
 // ==================================================================================
 
 const client = new Client({
-intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+intents: [
+GatewayIntentBits.Guilds,
+GatewayIntentBits.GuildMessages,
+GatewayIntentBits.MessageContent
+],
 partials: [Partials.Message, Partials.Channel]
 });
 
@@ -411,7 +404,7 @@ const priceIndicator = priceChange1h >= 0 ? '🟢' : '🔴';
 
 const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(`${badge} ${token.name} [$${Utils.formatUSD(analysis.fdv)}] - ${token.symbol}/SOL`)
+    .setTitle(`${badge} ${token.name} [${Utils.formatUSD(analysis.fdv)}] - ${token.symbol}/SOL`)
     .setURL(dexLink)
     .setDescription(`
 ```
@@ -431,17 +424,14 @@ const embed = new EmbedBuilder()
 `) .setFooter({ text: `Green Chip V8 • ${Utils.getUSTime()}`, iconURL: client.user?.displayAvatarURL() });
 
 ```
-// Add profile image if available
 if (pair.info?.imageUrl) {
     embed.setThumbnail(pair.info.imageUrl);
 }
 
-// Add banner if available
 if (pair.info?.header) {
     embed.setImage(pair.info.header);
 }
 
-// Create Copy CA Button
 const row = new ActionRowBuilder()
     .addComponents(
         new ButtonBuilder()
@@ -474,7 +464,6 @@ try {
 
 }
 
-// Handle Copy CA Button
 client.on(‘interactionCreate’, async (interaction) => {
 if (!interaction.isButton()) return;
 
@@ -496,7 +485,6 @@ setInterval(async () => {
 const now = moment().tz(CONFIG.TIMEZONE);
 
 ```
-    // Daily Report at Midnight (00:00)
     if (now.hour() === 0 && now.minute() === 0) {
         const todayStr = now.format("YYYY-MM-DD");
         if (STATE.lastDailyReport !== todayStr) {
@@ -506,7 +494,6 @@ const now = moment().tz(CONFIG.TIMEZONE);
         }
     }
     
-    // Weekly Report on Sunday at 11:59 PM
     if (now.day() === 0 && now.hour() === 23 && now.minute() === 59) {
         const weekStr = now.format("YYYY-WW");
         if (STATE.lastWeeklyReport !== weekStr) {
@@ -516,7 +503,6 @@ const now = moment().tz(CONFIG.TIMEZONE);
         }
     }
     
-    // Monthly Report on Last Day of Month at 11:59 PM
     if (now.date() === now.daysInMonth() && now.hour() === 23 && now.minute() === 59) {
         const monthStr = now.format("YYYY-MM");
         if (STATE.lastMonthlyReport !== monthStr) {
@@ -614,12 +600,10 @@ for (const [addr, data] of STATE.activeTracks) {
         const currentMcap = pair.fdv || pair.marketCap || 0;
         const liq = pair.liquidity?.usd || 0;
         
-        // Calculate REAL market cap based gain
         const gain = Utils.calculateMCapGain(data.entryMcap, currentMcap);
 
         STATE.updatePeaks(addr, gain, currentMcap, 'ACTIVE');
 
-        // RUG CHECK (No notification, just stop tracking)
         const currPrice = parseFloat(pair.priceUsd);
         if (currPrice < (data.entryPrice * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
             STATE.updatePeaks(addr, gain, currentMcap, 'RUG');
@@ -629,7 +613,6 @@ for (const [addr, data] of STATE.activeTracks) {
 
         if (gain > data.maxGain) data.maxGain = gain;
 
-        // GAIN ALERTS
         if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_1 && !data.t1) {
             await sendGainUpdate(data, currentMcap, gain, 'GAIN');
             data.t1 = true;
@@ -727,14 +710,76 @@ if (m.content === '!forcemonthly') {
 
 });
 
+// ==================================================================================
+//  🚀  INITIALIZATION
+// ==================================================================================
+
 const app = express();
-app.get(’/’, (req, res) => res.json({ status: ‘ONLINE’, version: CONFIG.VERSION }));
-app.listen(process.env.PORT || 3000);
+
+app.get(’/’, (req, res) => {
+res.json({
+status: ‘ONLINE’,
+version: CONFIG.VERSION,
+uptime: Utils.getAge(STATE.stats.start),
+tracking: STATE.activeTracks.size,
+calls: STATE.stats.calls,
+timezone: CONFIG.TIMEZONE
+});
+});
+
+app.get(’/health’, (req, res) => {
+res.json({
+healthy: true,
+bot: client.isReady() ? ‘connected’ : ‘disconnected’,
+timestamp: Utils.getUSTime()
+});
+});
+
+const PORT = process.env.PORT || 3000;
+
+const server = app.listen(PORT, () => {
+Utils.log(‘SUCCESS’, ‘Server’, `HTTP Server running on port ${PORT}`);
+});
+
+server.on(‘error’, (error) => {
+Utils.log(‘ERROR’, ‘Server’, `Failed to start: ${error.message}`);
+});
+
+client.on(‘error’, (error) => {
+Utils.log(‘ERROR’, ‘Discord’, error.message);
+});
+
+client.on(‘warn’, (warning) => {
+Utils.log(‘WARN’, ‘Discord’, warning);
+});
+
+process.on(‘unhandledRejection’, (error) => {
+Utils.log(‘ERROR’, ‘Process’, `Unhandled Rejection: ${error.message}`);
+});
+
+process.on(‘uncaughtException’, (error) => {
+Utils.log(‘ERROR’, ‘Process’, `Uncaught Exception: ${error.message}`);
+process.exit(1);
+});
 
 client.once(‘ready’, () => {
-Utils.log(‘SUCCESS’, ‘System’, `Logged in as ${client.user.tag}`);
-scanProfiles();
-scanBoosts();
-scanSearch();
-runTracker();
-processQueue
+Utils.log(‘SUCCESS’, ‘System’, `✅ Logged in as ${client.user.tag}`);
+Utils.log(‘INFO’, ‘System’, `🌍 Timezone: ${CONFIG.TIMEZONE}`);
+Utils.log(‘INFO’, ‘System’, `⏰ Current Time: ${Utils.getUSTime()}`);
+
+```
+client.user.setActivity('Green Chip V8 🟢', { type: ActivityType.Watching });
+
+setTimeout(() => {
+    Utils.log('INFO', 'System', '🚀 Starting all scanners...');
+    scanProfiles();
+    scanBoosts();
+    scanSearch();
+    runTracker();
+    processQueue();
+    initLeaderboardScheduler();
+    Utils.log('SUCCESS', 'System', '✅ All systems operational!');
+}, CONFIG.SYSTEM.STARTUP_DELAY);
+```
+
+});
