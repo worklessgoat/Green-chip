@@ -1,11 +1,11 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V8.5 - LEADERBOARD & COMPACT EDITION
+//  🟢 GREEN CHIP V9.0 - MULTI-CHAIN EDITION (SOL + BNB)
 //  ---------------------------------------------------------------------------------
-//  [1] 🚫 NO SPACES: TIGHTENED UI (Zero extra gaps).
-//  [2] 🏆 LEADERBOARDS: Daily (10), Weekly (15), Monthly (20).
-//  [3] 📢 CHANNEL: Leaderboards sent only to 1459729982459871252.
-//  [4] 🖼️ VISUALS: Banners & Photos preserved exactly.
-//  [5] 📈 TRACKER: Market Cap gains + Auto-Recap logic.
+//  [1] 🌍 MULTI-CHAIN: Scans Solana & BSC (Binance Smart Chain) simultaneously.
+//  [2] 🔀 SMART ROUTING: SOL -> Main Channel | BNB -> Dedicated BNB Channel.
+//  [3] 🚫 NO SPACES: Compact UI (No gaps).
+//  [4] 🏆 LEADERBOARDS: Daily (10), Weekly (15), Monthly (20) [Unified].
+//  [5] 📈 TRACKER: Market Cap based gains + Peak detection.
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
 // ==================================================================================
@@ -24,8 +24,8 @@ moment.tz.setDefault("America/New_York");
 // ==================================================================================
 
 const CONFIG = {
-    BOT_NAME: "Green Chip V8",
-    VERSION: "8.5.0-LEADERBOARD",
+    BOT_NAME: "Green Chip V9",
+    VERSION: "9.0.0-BNB-SUPPORT",
     
     // --- Strategy Filters ---
     FILTERS: {
@@ -63,7 +63,8 @@ const CONFIG = {
     ENDPOINTS: {
         PROFILES: "https://api.dexscreener.com/token-profiles/latest/v1", 
         BOOSTS: "https://api.dexscreener.com/token-boosts/latest/v1",     
-        SEARCH: "https://api.dexscreener.com/latest/dex/search?q=solana", 
+        SEARCH_SOL: "https://api.dexscreener.com/latest/dex/search?q=solana", 
+        SEARCH_BNB: "https://api.dexscreener.com/latest/dex/search?q=bsc", //
         TOKENS: "https://api.dexscreener.com/latest/dex/tokens/"          
     },
 
@@ -73,8 +74,9 @@ const CONFIG = {
 
     // --- Channels ---
     CHANNELS: {
-        ALERTS: process.env.CHANNEL_ID, // Standard alerts
-        LEADERBOARD: "1459729982459871252" // 🏆 Highest Gains Channel
+        ALERTS_SOL: process.env.CHANNEL_ID,     // ☀️ SOL Calls
+        ALERTS_BNB: "1462457809445584967",      // 🟡 BNB Calls (Requested Channel)
+        LEADERBOARD: "1459729982459871252"      // 🏆 Leaderboards
     }
 };
 
@@ -132,7 +134,6 @@ class StateManager {
         this.processing = new Set();       
         this.queue = [];                   
         
-        // 🆕 EXPANDED MEMORY FOR LEADERBOARDS
         this.dailyStats = new Map();       
         this.weeklyStats = new Map();
         this.monthlyStats = new Map();
@@ -164,11 +165,11 @@ class StateManager {
             symbol: data.symbol,
             entryMcap: data.mcap, 
             maxGain: 0,
+            chainId: data.chainId, // Track chain for leaderboards
             time: Date.now(),
             status: 'ACTIVE'
         };
 
-        // Add to all tracking maps
         this.dailyStats.set(address, { ...statEntry });
         this.weeklyStats.set(address, { ...statEntry });
         this.monthlyStats.set(address, { ...statEntry });
@@ -179,7 +180,6 @@ class StateManager {
         }
     }
 
-    // Updates Peak Gain in ALL memory banks (Daily, Weekly, Monthly)
     updatePeak(address, gain, status = 'ACTIVE') {
         const updateMap = (map) => {
             if (map.has(address)) {
@@ -245,19 +245,21 @@ class RiskEngine {
         const dex = (pair.dexId || '').toLowerCase();
         if (dex.includes('raydium')) status = 'GRADUATED';
         if (dex.includes('pump')) status = 'PUMP.FUN';
+        if (pair.chainId === 'bsc') status = 'BSC GEM'; //
 
         return { safe, hype, status, vol, liq, fdv, riskLevel, color };
     }
 }
 
 // ==================================================================================
-//  📡  SCANNERS
+//  📡  SCANNERS (MULTI-CHAIN)
 // ==================================================================================
 
 async function scanProfiles() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.PROFILES, { timeout: 5000, headers: Utils.getHeaders() });
-        const profiles = res.data?.filter(p => p.chainId === 'solana').slice(0, 25) || [];
+        // Allow BOTH Solana and BSC
+        const profiles = res.data?.filter(p => p.chainId === 'solana' || p.chainId === 'bsc').slice(0, 25) || [];
         if (profiles.length) await fetchAndProcess(profiles.map(p => p.tokenAddress), 'PROFILE');
     } catch (e) { handleErr('Profiles', e); }
     setTimeout(scanProfiles, CONFIG.SYSTEM.SCAN_DELAY_PROFILES);
@@ -266,17 +268,26 @@ async function scanProfiles() {
 async function scanBoosts() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.BOOSTS, { timeout: 5000, headers: Utils.getHeaders() });
-        const boosts = res.data?.filter(p => p.chainId === 'solana').slice(0, 25) || [];
+        // Allow BOTH Solana and BSC
+        const boosts = res.data?.filter(p => p.chainId === 'solana' || p.chainId === 'bsc').slice(0, 25) || [];
         if (boosts.length) await fetchAndProcess(boosts.map(p => p.tokenAddress), 'BOOST');
     } catch (e) { handleErr('Boosts', e); }
     setTimeout(scanBoosts, CONFIG.SYSTEM.SCAN_DELAY_BOOSTS);
 }
 
+// Scans both SOL and BSC Search endpoints
 async function scanSearch() {
     try {
-        const res = await axios.get(CONFIG.ENDPOINTS.SEARCH, { timeout: 5000, headers: Utils.getHeaders() });
-        const pairs = res.data?.pairs || [];
-        for (const pair of pairs) processPair(pair, 'SEARCH');
+        // SOL Search
+        const resSol = await axios.get(CONFIG.ENDPOINTS.SEARCH_SOL, { timeout: 5000, headers: Utils.getHeaders() });
+        const pairsSol = resSol.data?.pairs || [];
+        for (const pair of pairsSol) processPair(pair, 'SEARCH');
+
+        // BNB Search
+        const resBnb = await axios.get(CONFIG.ENDPOINTS.SEARCH_BNB, { timeout: 5000, headers: Utils.getHeaders() });
+        const pairsBnb = resBnb.data?.pairs || [];
+        for (const pair of pairsBnb) processPair(pair, 'SEARCH');
+
     } catch (e) { handleErr('Search', e); }
     setTimeout(scanSearch, CONFIG.SYSTEM.SCAN_DELAY_SEARCH);
 }
@@ -292,7 +303,12 @@ async function fetchAndProcess(addresses, source) {
 }
 
 function processPair(pair, source) {
-    if (!pair || !pair.baseToken || pair.chainId !== 'solana') return;
+    if (!pair || !pair.baseToken) return;
+    
+    // Allow SOL or BSC
+    const chain = pair.chainId;
+    if (chain !== 'solana' && chain !== 'bsc') return; //
+
     const addr = pair.baseToken.address;
 
     if (!STATE.lockCoin(addr)) return;
@@ -309,17 +325,18 @@ function processPair(pair, source) {
         name: pair.baseToken.name, 
         symbol: pair.baseToken.symbol, 
         price: parseFloat(pair.priceUsd),
-        mcap: analysis.fdv 
+        mcap: analysis.fdv,
+        chainId: chain // Save chain ID for routing
     });
     
     STATE.queue.push({ pair, analysis, source });
-    Utils.log('FOUND', source, `Queued: ${pair.baseToken.name}`);
+    Utils.log('FOUND', source, `Queued: ${pair.baseToken.name} [${chain.toUpperCase()}]`);
 }
 
 function handleErr(source, e) {}
 
 // ==================================================================================
-//  💬  DISCORD SENDER (TIGHTENED UI - NO GAPS)
+//  💬  DISCORD SENDER (SMART ROUTING)
 // ==================================================================================
 
 const client = new Client({
@@ -338,29 +355,38 @@ async function processQueue() {
 }
 
 async function sendAlert(pair, analysis, source) {
-    const channel = client.channels.cache.get(CONFIG.CHANNELS.ALERTS);
+    // 🔀 ROUTING LOGIC
+    let targetChannelId = CONFIG.CHANNELS.ALERTS_SOL; // Default to SOL
+    let chainBadge = '☀️';
+
+    if (pair.chainId === 'bsc') {
+        targetChannelId = CONFIG.CHANNELS.ALERTS_BNB; // Route to BNB Channel
+        chainBadge = '🟡';
+    }
+
+    const channel = client.channels.cache.get(targetChannelId);
     if (!channel) return;
 
     const token = pair.baseToken;
     const socials = pair.info?.socials || [];
-    const dexLink = `https://dexscreener.com/solana/${pair.pairAddress}`;
+    const dexLink = `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`; // Dynamic Link
     
     // UI Elements
     const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ') || '⚠️ No Socials';
     const banner = pair.info?.header || null; 
     const icon = pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
 
-    // 🟢 DESCRIPTION: COMPACT MODE (REMOVED EXTRA NEWLINES)
-    const desc = `**Source:** ${source} | **Risk:** ${analysis.riskLevel}\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
+    // 🟢 DESCRIPTION: COMPACT MODE
+    const desc = `**Chain:** ${chainBadge} ${pair.chainId.toUpperCase()} | **Risk:** ${analysis.riskLevel}\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
 
     const embed = new EmbedBuilder()
         .setColor(analysis.color)
         .setTitle(`${analysis.riskLevel === 'GREEN' ? '🟢' : analysis.riskLevel === 'RED' ? '🔴' : '🟡'} ${token.name} ($${token.symbol})`)
         .setURL(dexLink)
-        .setDescription(desc) // Compact Description
-        .setThumbnail(icon)   // Profile Picture
-        .setImage(banner)     // Big Banner at bottom
-        .setFooter({ text: `Green Chip V8 • ${moment().format('h:mm A')} EST`, iconURL: client.user.displayAvatarURL() });
+        .setDescription(desc) 
+        .setThumbnail(icon)   
+        .setImage(banner)     
+        .setFooter({ text: `Green Chip V9 • ${moment().format('h:mm A')} EST`, iconURL: client.user.displayAvatarURL() });
 
     const row = new ActionRowBuilder()
         .addComponents(
@@ -386,7 +412,7 @@ async function sendAlert(pair, analysis, source) {
         });
         
         STATE.stats.calls++;
-        Utils.log('SUCCESS', 'Discord', `Sent Alert: ${token.name}`);
+        Utils.log('SUCCESS', 'Discord', `Sent ${pair.chainId.toUpperCase()} Alert: ${token.name}`);
     } catch (e) {
         Utils.log('ERROR', 'Discord', e.message);
     }
@@ -429,7 +455,7 @@ function initScheduler() {
 }
 
 async function sendLeaderboard(type, statMap, limit) {
-    const channel = client.channels.cache.get(CONFIG.CHANNELS.LEADERBOARD); // 🏆 Specific Channel
+    const channel = client.channels.cache.get(CONFIG.CHANNELS.LEADERBOARD); 
     if (!channel) return;
 
     const allCalls = Array.from(statMap.values());
@@ -444,8 +470,11 @@ async function sendLeaderboard(type, statMap, limit) {
         if (coin.maxGain > 100) icon = '🚀';
         if (coin.maxGain > 500) icon = '👑';
         if (coin.status === 'RUG') icon = '💀';
+        
+        // Added Chain Badge (☀️ or 🟡) to Leaderboard
+        const badge = coin.chainId === 'bsc' ? '🟡' : '☀️';
 
-        desc += `**#${index + 1} ${icon} ${coin.name} ($${coin.symbol})**\n`;
+        desc += `**#${index + 1} ${badge} ${coin.name} ($${coin.symbol})**\n`;
         desc += `Peak: **+${coin.maxGain.toFixed(0)}%**\n`;
         desc += `Status: ${coin.status}\n\n`;
     });
@@ -455,7 +484,7 @@ async function sendLeaderboard(type, statMap, limit) {
         .setTitle(`🏆 GREEN CHIP ${type} LEADERBOARD`)
         .setDescription(desc)
         .setTimestamp()
-        .setFooter({ text: 'Green Chip V8 • Highest Gains Tracker' });
+        .setFooter({ text: 'Green Chip V9 • Highest Gains Tracker' });
 
     try {
         await channel.send({ embeds: [embed] });
