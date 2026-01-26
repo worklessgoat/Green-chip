@@ -376,8 +376,8 @@ async function sendAlert(pair, analysis, source) {
     const banner = pair.info?.header || null; 
     const icon = pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
 
-    // 🟢 DESCRIPTION: COMPACT MODE
-    const desc = `**Chain:** ${chainBadge} ${pair.chainId.toUpperCase()} | **Risk:** ${analysis.riskLevel}\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
+    // 🟢 DESCRIPTION: COMPACT MODE + ADDED CA
+    const desc = `**Chain:** ${chainBadge} ${pair.chainId.toUpperCase()} | **Risk:** ${analysis.riskLevel}\n**CA:** \`${token.address}\`\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
 
     const embed = new EmbedBuilder()
         .setColor(analysis.color)
@@ -388,6 +388,7 @@ async function sendAlert(pair, analysis, source) {
         .setImage(banner)     
         .setFooter({ text: `Green Chip V9 • ${moment().format('h:mm A')} EST`, iconURL: client.user.displayAvatarURL() });
 
+    // 🟢 BUTTON: EASY COPY CA
     const row = new ActionRowBuilder()
         .addComponents(
             new ButtonBuilder()
@@ -582,6 +583,7 @@ async function sendUpdate(data, currentMcap, gain, type) {
 //  🔧  SERVER
 // ==================================================================================
 
+// 🟢 BUTTON INTERACTION HANDLER (EASY COPY)
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
