@@ -20,6 +20,20 @@ const moment = require('moment-timezone');
 moment.tz.setDefault("America/New_York");
 
 // ==================================================================================
+//  🛡️  ANTI-CRASH & ERROR HANDLING (FIXED)
+// ==================================================================================
+
+process.on('unhandledRejection', (reason, p) => {
+    console.log(' [antiCrash] :: Unhandled Rejection/Catch');
+    console.log(reason, p);
+});
+
+process.on("uncaughtException", (err, origin) => {
+    console.log(' [antiCrash] :: Uncaught Exception/Catch');
+    console.log(err, origin);
+});
+
+// ==================================================================================
 //  ⚙️  CONFIGURATION MATRIX
 // ==================================================================================
 
@@ -64,7 +78,7 @@ const CONFIG = {
         PROFILES: "https://api.dexscreener.com/token-profiles/latest/v1", 
         BOOSTS: "https://api.dexscreener.com/token-boosts/latest/v1",     
         SEARCH_SOL: "https://api.dexscreener.com/latest/dex/search?q=solana", 
-        SEARCH_BNB: "https://api.dexscreener.com/latest/dex/search?q=bsc", //
+        SEARCH_BNB: "https://api.dexscreener.com/latest/dex/search?q=bsc", 
         TOKENS: "https://api.dexscreener.com/latest/dex/tokens/"          
     },
 
@@ -165,7 +179,7 @@ class StateManager {
             symbol: data.symbol,
             entryMcap: data.mcap, 
             maxGain: 0,
-            chainId: data.chainId, // Track chain for leaderboards
+            chainId: data.chainId, 
             time: Date.now(),
             status: 'ACTIVE'
         };
@@ -228,7 +242,6 @@ class RiskEngine {
             if (name.includes('test') || name.length > 20) safe = false;
         }
 
-        // Risk Colors
         let riskLevel = 'YELLOW'; 
         let color = '#FFFF00'; 
 
@@ -245,7 +258,7 @@ class RiskEngine {
         const dex = (pair.dexId || '').toLowerCase();
         if (dex.includes('raydium')) status = 'GRADUATED';
         if (dex.includes('pump')) status = 'PUMP.FUN';
-        if (pair.chainId === 'bsc') status = 'BSC GEM'; //
+        if (pair.chainId === 'bsc') status = 'BSC GEM'; 
 
         return { safe, hype, status, vol, liq, fdv, riskLevel, color };
     }
@@ -258,7 +271,6 @@ class RiskEngine {
 async function scanProfiles() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.PROFILES, { timeout: 5000, headers: Utils.getHeaders() });
-        // Allow BOTH Solana and BSC
         const profiles = res.data?.filter(p => p.chainId === 'solana' || p.chainId === 'bsc').slice(0, 25) || [];
         if (profiles.length) await fetchAndProcess(profiles.map(p => p.tokenAddress), 'PROFILE');
     } catch (e) { handleErr('Profiles', e); }
@@ -268,22 +280,18 @@ async function scanProfiles() {
 async function scanBoosts() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.BOOSTS, { timeout: 5000, headers: Utils.getHeaders() });
-        // Allow BOTH Solana and BSC
         const boosts = res.data?.filter(p => p.chainId === 'solana' || p.chainId === 'bsc').slice(0, 25) || [];
         if (boosts.length) await fetchAndProcess(boosts.map(p => p.tokenAddress), 'BOOST');
     } catch (e) { handleErr('Boosts', e); }
     setTimeout(scanBoosts, CONFIG.SYSTEM.SCAN_DELAY_BOOSTS);
 }
 
-// Scans both SOL and BSC Search endpoints
 async function scanSearch() {
     try {
-        // SOL Search
         const resSol = await axios.get(CONFIG.ENDPOINTS.SEARCH_SOL, { timeout: 5000, headers: Utils.getHeaders() });
         const pairsSol = resSol.data?.pairs || [];
         for (const pair of pairsSol) processPair(pair, 'SEARCH');
 
-        // BNB Search
         const resBnb = await axios.get(CONFIG.ENDPOINTS.SEARCH_BNB, { timeout: 5000, headers: Utils.getHeaders() });
         const pairsBnb = resBnb.data?.pairs || [];
         for (const pair of pairsBnb) processPair(pair, 'SEARCH');
@@ -305,9 +313,8 @@ async function fetchAndProcess(addresses, source) {
 function processPair(pair, source) {
     if (!pair || !pair.baseToken) return;
     
-    // Allow SOL or BSC
     const chain = pair.chainId;
-    if (chain !== 'solana' && chain !== 'bsc') return; //
+    if (chain !== 'solana' && chain !== 'bsc') return; 
 
     const addr = pair.baseToken.address;
 
@@ -326,14 +333,16 @@ function processPair(pair, source) {
         symbol: pair.baseToken.symbol, 
         price: parseFloat(pair.priceUsd),
         mcap: analysis.fdv,
-        chainId: chain // Save chain ID for routing
+        chainId: chain 
     });
     
     STATE.queue.push({ pair, analysis, source });
     Utils.log('FOUND', source, `Queued: ${pair.baseToken.name} [${chain.toUpperCase()}]`);
 }
 
-function handleErr(source, e) {}
+function handleErr(source, e) {
+    // Suppress console spam for common network timeouts
+}
 
 // ==================================================================================
 //  💬  DISCORD SENDER (SMART ROUTING)
@@ -355,12 +364,11 @@ async function processQueue() {
 }
 
 async function sendAlert(pair, analysis, source) {
-    // 🔀 ROUTING LOGIC
-    let targetChannelId = CONFIG.CHANNELS.ALERTS_SOL; // Default to SOL
+    let targetChannelId = CONFIG.CHANNELS.ALERTS_SOL; 
     let chainBadge = '☀️';
 
     if (pair.chainId === 'bsc') {
-        targetChannelId = CONFIG.CHANNELS.ALERTS_BNB; // Route to BNB Channel
+        targetChannelId = CONFIG.CHANNELS.ALERTS_BNB; 
         chainBadge = '🟡';
     }
 
@@ -369,14 +377,12 @@ async function sendAlert(pair, analysis, source) {
 
     const token = pair.baseToken;
     const socials = pair.info?.socials || [];
-    const dexLink = `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`; // Dynamic Link
+    const dexLink = `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`; 
     
-    // UI Elements
     const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ') || '⚠️ No Socials';
     const banner = pair.info?.header || null; 
     const icon = pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
 
-    // 🟢 DESCRIPTION: COMPACT MODE
     const desc = `**Chain:** ${chainBadge} ${pair.chainId.toUpperCase()} | **Risk:** ${analysis.riskLevel}\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
 
     const embed = new EmbedBuilder()
@@ -419,7 +425,7 @@ async function sendAlert(pair, analysis, source) {
 }
 
 // ==================================================================================
-//  📅  LEADERBOARD SYSTEM (Daily 10, Weekly 15, Monthly 20)
+//  📅  LEADERBOARD SYSTEM
 // ==================================================================================
 
 function initScheduler() {
@@ -427,24 +433,20 @@ function initScheduler() {
         const now = moment();
         const dateStr = now.format("YYYY-MM-DD");
         
-        // 12:00 AM Midnight EST Check
         if (now.hour() === 0 && now.minute() === 0) {
             
-            // --- DAILY RECAP (Top 10) ---
             if (STATE.lastDailyReport !== dateStr) {
                 await sendLeaderboard('DAILY', STATE.dailyStats, 10);
                 STATE.lastDailyReport = dateStr;
                 STATE.dailyStats.clear();
             }
 
-            // --- WEEKLY RECAP (Top 15) - Mondays ---
             if (now.day() === 1 && STATE.lastWeeklyReport !== dateStr) {
                 await sendLeaderboard('WEEKLY', STATE.weeklyStats, 15);
                 STATE.lastWeeklyReport = dateStr;
                 STATE.weeklyStats.clear();
             }
 
-            // --- MONTHLY RECAP (Top 20) - 1st of Month ---
             if (now.date() === 1 && STATE.lastMonthlyReport !== dateStr) {
                 await sendLeaderboard('MONTHLY', STATE.monthlyStats, 20);
                 STATE.lastMonthlyReport = dateStr;
@@ -471,7 +473,6 @@ async function sendLeaderboard(type, statMap, limit) {
         if (coin.maxGain > 500) icon = '👑';
         if (coin.status === 'RUG') icon = '💀';
         
-        // Added Chain Badge (☀️ or 🟡) to Leaderboard
         const badge = coin.chainId === 'bsc' ? '🟡' : '☀️';
 
         desc += `**#${index + 1} ${badge} ${coin.name} ($${coin.symbol})**\n`;
@@ -495,7 +496,7 @@ async function sendLeaderboard(type, statMap, limit) {
 }
 
 // ==================================================================================
-//  📈  TRACKER (Small Space Banner for Gains)
+//  📈  TRACKER
 // ==================================================================================
 
 async function runTracker() {
@@ -521,7 +522,6 @@ async function runTracker() {
 
             const gain = ((currMcap - data.entryMcap) / data.entryMcap) * 100;
             
-            // 🧠 Update ALL Leaderboard Memories
             STATE.updatePeak(addr, gain, 'ACTIVE');
 
             if (currPrice < (data.entryPrice * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
@@ -563,7 +563,6 @@ async function sendUpdate(data, currentMcap, gain, type) {
         const bannerText = `GAIN +${gain.toFixed(0)}% | ${Utils.formatUSD(currentMcap)}`;
         const bannerUrl = `https://placehold.co/600x200/00b140/ffffff/png?text=${encodeURIComponent(bannerText)}&font=roboto`;
 
-        // 🟢 COMPACT GAINS DESCRIPTION
         const desc = `**${data.name} ($${data.symbol})**\nEntry: \`${Utils.formatUSD(data.entryMcap)}\`\nCurrent: \`${Utils.formatUSD(currentMcap)}\`\n[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`;
 
         const embed = new EmbedBuilder()
@@ -579,7 +578,7 @@ async function sendUpdate(data, currentMcap, gain, type) {
 }
 
 // ==================================================================================
-//  🔧  SERVER
+//  🔧  SERVER & STARTUP (FIXED)
 // ==================================================================================
 
 client.on('interactionCreate', async interaction => {
@@ -610,3 +609,16 @@ client.once('ready', () => {
     runTracker();
     processQueue();
     initScheduler();
+});
+
+// SAFE LOGIN: Now catches the "Status 1" error and tells you what's wrong
+if (!process.env.DISCORD_TOKEN) {
+    console.error("❌ CRITICAL ERROR: DISCORD_TOKEN is missing in Render Environment Variables!");
+    process.exit(1); 
+}
+
+client.login(process.env.DISCORD_TOKEN).catch(err => {
+    console.error("❌ LOGIN FAILED: The Token provided is invalid or has been reset by Discord.");
+    console.error("👉 ACTION: Go to Discord Dev Portal -> Reset Token -> Update Render Env Var.");
+    console.error(err);
+});
