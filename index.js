@@ -72,11 +72,11 @@ const CONFIG = {
         REFERRAL: "https://gmgn.ai/r/Greenchip"
     },
 
-    // --- Channels (UPDATED) ---
+    // --- Channels ---
     CHANNELS: {
-        ALERTS_SOL: "1467822067566248029",      // ☀️ SOL Calls
-        ALERTS_BNB: "1467824437473841234",      // 🟡 BNB Calls
-        LEADERBOARD: "1467823632003629087"      // 🏆 Leaderboards
+        ALERTS_SOL: "1459556721067556906",      // ☀️ SOL Calls (Updated)
+        ALERTS_BNB: "1462457809445584967",      // 🟡 BNB Calls (Updated)
+        LEADERBOARD: "1459729982459871252"      // 🏆 Leaderboards (Updated)
     }
 };
 
@@ -376,8 +376,8 @@ async function sendAlert(pair, analysis, source) {
     const banner = pair.info?.header || null; 
     const icon = pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
 
-    // 🟢 DESCRIPTION: COMPACT MODE
-    const desc = `**Chain:** ${chainBadge} ${pair.chainId.toUpperCase()} | **Risk:** ${analysis.riskLevel}\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
+    // 🟢 DESCRIPTION: COMPACT MODE + CA INCLUDED
+    const desc = `**Chain:** ${chainBadge} ${pair.chainId.toUpperCase()} | **Risk:** ${analysis.riskLevel}\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n**CA:** \`${token.address}\`\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
 
     const embed = new EmbedBuilder()
         .setColor(analysis.color)
@@ -388,16 +388,10 @@ async function sendAlert(pair, analysis, source) {
         .setImage(banner)     
         .setFooter({ text: `Green Chip V9 • ${moment().format('h:mm A')} EST`, iconURL: client.user.displayAvatarURL() });
 
-    const row = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId(`copy_${token.address}`)
-                .setLabel('📋 Copy CA')
-                .setStyle(ButtonStyle.Secondary)
-        );
+    // BUTTON REMOVED AS REQUESTED
 
     try {
-        const msg = await channel.send({ embeds: [embed], components: [row] });
+        const msg = await channel.send({ embeds: [embed] }); // Removed components: [row]
         
         STATE.activeTracks.set(token.address, {
             name: token.name,
@@ -582,14 +576,7 @@ async function sendUpdate(data, currentMcap, gain, type) {
 //  🔧  SERVER
 // ==================================================================================
 
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isButton()) return;
-    
-    if (interaction.customId.startsWith('copy_')) {
-        const ca = interaction.customId.split('_')[1];
-        await interaction.reply({ content: `${ca}`, ephemeral: true });
-    }
-});
+// Button Interaction Handler REMOVED (No longer needed)
 
 client.on('messageCreate', async (m) => {
     if (m.author.bot) return;
