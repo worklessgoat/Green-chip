@@ -1,13 +1,9 @@
 {
   "name": "green-chip-bot",
-  "version": "9.5.0",
-  "description": "Green Chip V9.5 Stable",
+  "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
-  },
-  "engines": {
-    "node": "18.x"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
@@ -16,5 +12,8 @@
     "express": "^4.18.2",
     "moment": "^2.30.1",
     "moment-timezone": "^0.5.45"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
