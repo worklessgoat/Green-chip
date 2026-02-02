@@ -1,5 +1,5 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V9.0 - PERFECTION EDITION (ANTI-CRASH)
+//  🟢 GREEN CHIP V9.0 - MULTI-CHAIN EDITION (SOL + BNB)
 //  ---------------------------------------------------------------------------------
 //  [1] 🌍 MULTI-CHAIN: Scans Solana & BSC (Binance Smart Chain) simultaneously.
 //  [2] 🔀 SMART ROUTING: SOL -> Main Channel | BNB -> Dedicated BNB Channel.
@@ -14,28 +14,10 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
+const moment = require('moment-timezone'); 
 
-// 🛡️ ANTI-CRASH SYSTEM: PREVENTS "EXIT STATUS 1"
-// This keeps the bot online even if there is a bug or network error.
-process.on('unhandledRejection', (reason, p) => {
-    console.log(' [Anti-Crash] :: Unhandled Rejection/Catch');
-    console.log(reason, p);
-});
-process.on("uncaughtException", (err, origin) => {
-    console.log(' [Anti-Crash] :: Uncaught Exception/Catch');
-    console.log(err, origin);
-});
-
-// 🛡️ SAFE TIMEZONE LOADING
-// If moment-timezone is missing on Render, this prevents the crash.
-let moment;
-try {
-    moment = require('moment-timezone');
-    moment.tz.setDefault("America/New_York");
-} catch (e) {
-    console.log("⚠️ Moment-Timezone missing, falling back to standard time.");
-    moment = require('moment');
-}
+// 🟢 CONFIGURATION: Set Timezone to US Eastern (New York)
+moment.tz.setDefault("America/New_York");
 
 // ==================================================================================
 //  ⚙️  CONFIGURATION MATRIX
@@ -45,39 +27,56 @@ const CONFIG = {
     BOT_NAME: "Green Chip V9",
     VERSION: "9.0.0-BNB-SUPPORT",
     
+    // --- Strategy Filters ---
     FILTERS: {
-        MIN_MCAP: 20000, MAX_MCAP: 75000, MIN_LIQ: 1500, MIN_VOL_H1: 500,         
-        MAX_AGE_MIN: 60, MIN_AGE_MIN: 1, REQUIRE_SOCIALS: true, ANTI_SPAM_NAMES: true    
+        MIN_MCAP: 20000,         
+        MAX_MCAP: 75000,         
+        MIN_LIQ: 1500,           
+        MIN_VOL_H1: 500,         
+        MAX_AGE_MIN: 60,         
+        MIN_AGE_MIN: 1,          
+        REQUIRE_SOCIALS: true,   
+        ANTI_SPAM_NAMES: true    
     },
 
+    // --- Tracking Logic ---
     TRACKER: {
-        GAIN_TRIGGER_1: 45, GAIN_TRIGGER_2: 100, GAIN_TRIGGER_3: 500,     
-        STOP_LOSS: 0.90, RUG_CHECK_LIQ: 300, MAX_HOURS: 24            
+        GAIN_TRIGGER_1: 45,      
+        GAIN_TRIGGER_2: 100,     
+        GAIN_TRIGGER_3: 500,     
+        STOP_LOSS: 0.90,         
+        RUG_CHECK_LIQ: 300,      
+        MAX_HOURS: 24            
     },
 
+    // --- System Intervals ---
     SYSTEM: {
         SCAN_DELAY_PROFILES: 15000,  
         SCAN_DELAY_BOOSTS: 30000,    
         SCAN_DELAY_SEARCH: 60000,    
         TRACK_DELAY: 15000,          
-        QUEUE_DELAY: 5000, // Increased slightly to 5s to prevent Discord bans          
+        QUEUE_DELAY: 3000,           
         DAILY_CHECK_INTERVAL: 60000  
     },
 
+    // --- Data Sources ---
     ENDPOINTS: {
         PROFILES: "https://api.dexscreener.com/token-profiles/latest/v1", 
         BOOSTS: "https://api.dexscreener.com/token-boosts/latest/v1",     
         SEARCH_SOL: "https://api.dexscreener.com/latest/dex/search?q=solana", 
-        SEARCH_BNB: "https://api.dexscreener.com/latest/dex/search?q=bsc", 
+        SEARCH_BNB: "https://api.dexscreener.com/latest/dex/search?q=bsc", //
         TOKENS: "https://api.dexscreener.com/latest/dex/tokens/"          
     },
 
-    URLS: { REFERRAL: "https://gmgn.ai/r/Greenchip" },
+    URLS: {
+        REFERRAL: "https://gmgn.ai/r/Greenchip"
+    },
 
+    // --- Channels (UPDATED) ---
     CHANNELS: {
-        ALERTS_SOL: process.env.CHANNEL_ID,     
-        ALERTS_BNB: "1462457809445584967",      
-        LEADERBOARD: "1459729982459871252"      
+        ALERTS_SOL: "1467822067566248029",      // ☀️ SOL Calls
+        ALERTS_BNB: "1467824437473841234",      // 🟡 BNB Calls
+        LEADERBOARD: "1467823632003629087"      // 🏆 Leaderboards
     }
 };
 
@@ -153,15 +152,22 @@ class StateManager {
         return true;
     }
 
-    unlockCoin(address) { this.processing.delete(address); }
+    unlockCoin(address) {
+        this.processing.delete(address);
+    }
 
     finalizeCoin(address, data) {
         this.processing.delete(address);
         this.history.add(address);
         
         const statEntry = {
-            name: data.name, symbol: data.symbol, entryMcap: data.mcap, 
-            maxGain: 0, chainId: data.chainId, time: Date.now(), status: 'ACTIVE'
+            name: data.name,
+            symbol: data.symbol,
+            entryMcap: data.mcap, 
+            maxGain: 0,
+            chainId: data.chainId, // Track chain for leaderboards
+            time: Date.now(),
+            status: 'ACTIVE'
         };
 
         this.dailyStats.set(address, { ...statEntry });
@@ -183,11 +189,13 @@ class StateManager {
                 map.set(address, stat);
             }
         };
+
         updateMap(this.dailyStats);
         updateMap(this.weeklyStats);
         updateMap(this.monthlyStats);
     }
 }
+
 const STATE = new StateManager();
 
 // ==================================================================================
@@ -214,55 +222,73 @@ class RiskEngine {
         if (liq < CONFIG.FILTERS.MIN_LIQ) safe = false;
         if (vol < CONFIG.FILTERS.MIN_VOL_H1) safe = false;
         if (CONFIG.FILTERS.REQUIRE_SOCIALS && socials.length === 0) safe = false;
+        
         if (CONFIG.FILTERS.ANTI_SPAM_NAMES) {
             const name = pair.baseToken.name.toLowerCase();
             if (name.includes('test') || name.length > 20) safe = false;
         }
 
-        let riskLevel = 'YELLOW'; let color = '#FFFF00'; 
-        if (liq < 4000 || fdv < 25000) { riskLevel = 'RED'; color = '#FF0000'; } 
-        else if (liq > 8000 && fdv > 40000 && socials.length > 0) { riskLevel = 'GREEN'; color = '#00FF00'; }
+        // Risk Colors
+        let riskLevel = 'YELLOW'; 
+        let color = '#FFFF00'; 
+
+        if (liq < 4000 || fdv < 25000) {
+            riskLevel = 'RED';
+            color = '#FF0000'; 
+        } 
+        else if (liq > 8000 && fdv > 40000 && socials.length > 0) {
+            riskLevel = 'GREEN';
+            color = '#00FF00'; 
+        }
 
         let status = 'UNKNOWN';
         const dex = (pair.dexId || '').toLowerCase();
         if (dex.includes('raydium')) status = 'GRADUATED';
         if (dex.includes('pump')) status = 'PUMP.FUN';
-        if (pair.chainId === 'bsc') status = 'BSC GEM'; 
+        if (pair.chainId === 'bsc') status = 'BSC GEM'; //
 
         return { safe, hype, status, vol, liq, fdv, riskLevel, color };
     }
 }
 
 // ==================================================================================
-//  📡  SCANNERS
+//  📡  SCANNERS (MULTI-CHAIN)
 // ==================================================================================
 
 async function scanProfiles() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.PROFILES, { timeout: 5000, headers: Utils.getHeaders() });
+        // Allow BOTH Solana and BSC
         const profiles = res.data?.filter(p => p.chainId === 'solana' || p.chainId === 'bsc').slice(0, 25) || [];
         if (profiles.length) await fetchAndProcess(profiles.map(p => p.tokenAddress), 'PROFILE');
-    } catch (e) {}
+    } catch (e) { handleErr('Profiles', e); }
     setTimeout(scanProfiles, CONFIG.SYSTEM.SCAN_DELAY_PROFILES);
 }
 
 async function scanBoosts() {
     try {
         const res = await axios.get(CONFIG.ENDPOINTS.BOOSTS, { timeout: 5000, headers: Utils.getHeaders() });
+        // Allow BOTH Solana and BSC
         const boosts = res.data?.filter(p => p.chainId === 'solana' || p.chainId === 'bsc').slice(0, 25) || [];
         if (boosts.length) await fetchAndProcess(boosts.map(p => p.tokenAddress), 'BOOST');
-    } catch (e) {}
+    } catch (e) { handleErr('Boosts', e); }
     setTimeout(scanBoosts, CONFIG.SYSTEM.SCAN_DELAY_BOOSTS);
 }
 
+// Scans both SOL and BSC Search endpoints
 async function scanSearch() {
     try {
+        // SOL Search
         const resSol = await axios.get(CONFIG.ENDPOINTS.SEARCH_SOL, { timeout: 5000, headers: Utils.getHeaders() });
-        for (const pair of (resSol.data?.pairs || [])) processPair(pair, 'SEARCH');
-        
+        const pairsSol = resSol.data?.pairs || [];
+        for (const pair of pairsSol) processPair(pair, 'SEARCH');
+
+        // BNB Search
         const resBnb = await axios.get(CONFIG.ENDPOINTS.SEARCH_BNB, { timeout: 5000, headers: Utils.getHeaders() });
-        for (const pair of (resBnb.data?.pairs || [])) processPair(pair, 'SEARCH');
-    } catch (e) {}
+        const pairsBnb = resBnb.data?.pairs || [];
+        for (const pair of pairsBnb) processPair(pair, 'SEARCH');
+
+    } catch (e) { handleErr('Search', e); }
     setTimeout(scanSearch, CONFIG.SYSTEM.SCAN_DELAY_SEARCH);
 }
 
@@ -271,36 +297,46 @@ async function fetchAndProcess(addresses, source) {
     try {
         const chunk = addresses.slice(0, 30).join(',');
         const res = await axios.get(`${CONFIG.ENDPOINTS.TOKENS}${chunk}`, { timeout: 5000, headers: Utils.getHeaders() });
-        for (const pair of (res.data?.pairs || [])) processPair(pair, source);
-    } catch (e) {}
+        const pairs = res.data?.pairs || [];
+        for (const pair of pairs) processPair(pair, source);
+    } catch (e) { handleErr('Fetch', e); }
 }
 
 function processPair(pair, source) {
     if (!pair || !pair.baseToken) return;
+    
+    // Allow SOL or BSC
     const chain = pair.chainId;
-    if (chain !== 'solana' && chain !== 'bsc') return; 
+    if (chain !== 'solana' && chain !== 'bsc') return; //
 
     const addr = pair.baseToken.address;
+
     if (!STATE.lockCoin(addr)) return;
 
     const analysis = RiskEngine.analyze(pair);
     const ageMins = (Date.now() - pair.pairCreatedAt) / 60000;
 
     if (ageMins < CONFIG.FILTERS.MIN_AGE_MIN || ageMins > CONFIG.FILTERS.MAX_AGE_MIN || !analysis.safe) {
-        STATE.unlockCoin(addr); return;
+        STATE.unlockCoin(addr);
+        return;
     }
 
     STATE.finalizeCoin(addr, { 
-        name: pair.baseToken.name, symbol: pair.baseToken.symbol, 
-        price: parseFloat(pair.priceUsd), mcap: analysis.fdv, chainId: chain 
+        name: pair.baseToken.name, 
+        symbol: pair.baseToken.symbol, 
+        price: parseFloat(pair.priceUsd),
+        mcap: analysis.fdv,
+        chainId: chain // Save chain ID for routing
     });
     
     STATE.queue.push({ pair, analysis, source });
     Utils.log('FOUND', source, `Queued: ${pair.baseToken.name} [${chain.toUpperCase()}]`);
 }
 
+function handleErr(source, e) {}
+
 // ==================================================================================
-//  💬  DISCORD SENDER
+//  💬  DISCORD SENDER (SMART ROUTING)
 // ==================================================================================
 
 const client = new Client({
@@ -308,73 +344,111 @@ const client = new Client({
 });
 
 async function processQueue() {
-    if (STATE.queue.length === 0) { setTimeout(processQueue, 1000); return; }
+    if (STATE.queue.length === 0) {
+        setTimeout(processQueue, 1000);
+        return;
+    }
+
     const item = STATE.queue.shift();
     await sendAlert(item.pair, item.analysis, item.source);
     setTimeout(processQueue, CONFIG.SYSTEM.QUEUE_DELAY);
 }
 
 async function sendAlert(pair, analysis, source) {
-    let targetChannelId = CONFIG.CHANNELS.ALERTS_SOL;
+    // 🔀 ROUTING LOGIC
+    let targetChannelId = CONFIG.CHANNELS.ALERTS_SOL; // Default to SOL
     let chainBadge = '☀️';
-    if (pair.chainId === 'bsc') { targetChannelId = CONFIG.CHANNELS.ALERTS_BNB; chainBadge = '🟡'; }
+
+    if (pair.chainId === 'bsc') {
+        targetChannelId = CONFIG.CHANNELS.ALERTS_BNB; // Route to BNB Channel
+        chainBadge = '🟡';
+    }
 
     const channel = client.channels.cache.get(targetChannelId);
     if (!channel) return;
 
     const token = pair.baseToken;
     const socials = pair.info?.socials || [];
-    const dexLink = `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`; 
+    const dexLink = `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`; // Dynamic Link
+    
+    // UI Elements
     const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ') || '⚠️ No Socials';
-    const desc = `**Chain:** ${chainBadge} ${pair.chainId.toUpperCase()} | **Risk:** ${analysis.riskLevel}\n**CA:** \`${token.address}\`\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
+    const banner = pair.info?.header || null; 
+    const icon = pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
+
+    // 🟢 DESCRIPTION: COMPACT MODE
+    const desc = `**Chain:** ${chainBadge} ${pair.chainId.toUpperCase()} | **Risk:** ${analysis.riskLevel}\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
 
     const embed = new EmbedBuilder()
         .setColor(analysis.color)
-        .setTitle(`${analysis.riskLevel==='GREEN'?'🟢':analysis.riskLevel==='RED'?'🔴':'🟡'} ${token.name} ($${token.symbol})`)
-        .setURL(dexLink).setDescription(desc)
-        .setThumbnail(pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png')
-        .setImage(pair.info?.header || null)
+        .setTitle(`${analysis.riskLevel === 'GREEN' ? '🟢' : analysis.riskLevel === 'RED' ? '🔴' : '🟡'} ${token.name} ($${token.symbol})`)
+        .setURL(dexLink)
+        .setDescription(desc) 
+        .setThumbnail(icon)   
+        .setImage(banner)     
         .setFooter({ text: `Green Chip V9 • ${moment().format('h:mm A')} EST`, iconURL: client.user.displayAvatarURL() });
 
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`copy_${token.address}`).setLabel('📋 Copy CA').setStyle(ButtonStyle.Secondary)
-    );
+    const row = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId(`copy_${token.address}`)
+                .setLabel('📋 Copy CA')
+                .setStyle(ButtonStyle.Secondary)
+        );
 
     try {
         const msg = await channel.send({ embeds: [embed], components: [row] });
+        
         STATE.activeTracks.set(token.address, {
-            name: token.name, symbol: token.symbol, entryMcap: analysis.fdv, 
-            entryPrice: parseFloat(pair.priceUsd), maxGain: 0, msgId: msg.id, chanId: channel.id,
-            t1: false, t2: false, t3: false, start: Date.now()
+            name: token.name,
+            symbol: token.symbol,
+            entryMcap: analysis.fdv, 
+            entryPrice: parseFloat(pair.priceUsd),
+            maxGain: 0,
+            msgId: msg.id,
+            chanId: channel.id,
+            t1: false, t2: false, t3: false,
+            start: Date.now()
         });
+        
         STATE.stats.calls++;
         Utils.log('SUCCESS', 'Discord', `Sent ${pair.chainId.toUpperCase()} Alert: ${token.name}`);
     } catch (e) {
-        if (e.code === 50013) console.error("⚠️ CRITICAL: Turn on 'Message Content Intent' in Dev Portal!");
-        else console.error(`❌ Send Failed: ${e.message}`);
+        Utils.log('ERROR', 'Discord', e.message);
     }
 }
 
 // ==================================================================================
-//  📅  LEADERBOARD & TRACKER
+//  📅  LEADERBOARD SYSTEM (Daily 10, Weekly 15, Monthly 20)
 // ==================================================================================
 
 function initScheduler() {
     setInterval(async () => {
         const now = moment();
         const dateStr = now.format("YYYY-MM-DD");
+        
+        // 12:00 AM Midnight EST Check
         if (now.hour() === 0 && now.minute() === 0) {
+            
+            // --- DAILY RECAP (Top 10) ---
             if (STATE.lastDailyReport !== dateStr) {
                 await sendLeaderboard('DAILY', STATE.dailyStats, 10);
-                STATE.lastDailyReport = dateStr; STATE.dailyStats.clear();
+                STATE.lastDailyReport = dateStr;
+                STATE.dailyStats.clear();
             }
+
+            // --- WEEKLY RECAP (Top 15) - Mondays ---
             if (now.day() === 1 && STATE.lastWeeklyReport !== dateStr) {
                 await sendLeaderboard('WEEKLY', STATE.weeklyStats, 15);
-                STATE.lastWeeklyReport = dateStr; STATE.weeklyStats.clear();
+                STATE.lastWeeklyReport = dateStr;
+                STATE.weeklyStats.clear();
             }
+
+            // --- MONTHLY RECAP (Top 20) - 1st of Month ---
             if (now.date() === 1 && STATE.lastMonthlyReport !== dateStr) {
                 await sendLeaderboard('MONTHLY', STATE.monthlyStats, 20);
-                STATE.lastMonthlyReport = dateStr; STATE.monthlyStats.clear();
+                STATE.lastMonthlyReport = dateStr;
+                STATE.monthlyStats.clear();
             }
         }
     }, CONFIG.SYSTEM.DAILY_CHECK_INTERVAL);
@@ -383,40 +457,125 @@ function initScheduler() {
 async function sendLeaderboard(type, statMap, limit) {
     const channel = client.channels.cache.get(CONFIG.CHANNELS.LEADERBOARD); 
     if (!channel) return;
-    const sorted = Array.from(statMap.values()).sort((a, b) => b.maxGain - a.maxGain).slice(0, limit);
-    if (!sorted.length) return;
+
+    const allCalls = Array.from(statMap.values());
+    const sorted = allCalls.sort((a, b) => b.maxGain - a.maxGain).slice(0, limit);
+
+    if (sorted.length === 0) return;
+
     let desc = `**Top ${limit} Performers for ${type}**\n\n`;
-    sorted.forEach((coin, i) => {
-        desc += `**#${i+1} ${coin.chainId==='bsc'?'🟡':'☀️'} ${coin.name} ($${coin.symbol})**\nPeak: **+${coin.maxGain.toFixed(0)}%**\nStatus: ${coin.status}\n\n`;
+
+    sorted.forEach((coin, index) => {
+        let icon = '🟢';
+        if (coin.maxGain > 100) icon = '🚀';
+        if (coin.maxGain > 500) icon = '👑';
+        if (coin.status === 'RUG') icon = '💀';
+        
+        // Added Chain Badge (☀️ or 🟡) to Leaderboard
+        const badge = coin.chainId === 'bsc' ? '🟡' : '☀️';
+
+        desc += `**#${index + 1} ${badge} ${coin.name} ($${coin.symbol})**\n`;
+        desc += `Peak: **+${coin.maxGain.toFixed(0)}%**\n`;
+        desc += `Status: ${coin.status}\n\n`;
     });
-    const embed = new EmbedBuilder().setColor('#FFD700').setTitle(`🏆 ${type} LEADERBOARD`).setDescription(desc).setTimestamp();
-    try { await channel.send({ embeds: [embed] }); } catch (e) {}
+
+    const embed = new EmbedBuilder()
+        .setColor('#FFD700')
+        .setTitle(`🏆 GREEN CHIP ${type} LEADERBOARD`)
+        .setDescription(desc)
+        .setTimestamp()
+        .setFooter({ text: 'Green Chip V9 • Highest Gains Tracker' });
+
+    try {
+        await channel.send({ embeds: [embed] });
+        Utils.log('DAILY', 'Leaderboard', `Sent ${type} report to Leaderboard Channel.`);
+    } catch (e) {
+        Utils.log('ERROR', 'Leaderboard', e.message);
+    }
 }
 
+// ==================================================================================
+//  📈  TRACKER (Small Space Banner for Gains)
+// ==================================================================================
+
 async function runTracker() {
-    if (STATE.activeTracks.size === 0) { setTimeout(runTracker, CONFIG.SYSTEM.TRACK_DELAY); return; }
+    if (STATE.activeTracks.size === 0) {
+        setTimeout(runTracker, CONFIG.SYSTEM.TRACK_DELAY);
+        return;
+    }
+
     for (const [addr, data] of STATE.activeTracks) {
         try {
-            if (Date.now() - data.start > (CONFIG.TRACKER.MAX_HOURS * 3600000)) { STATE.activeTracks.delete(addr); continue; }
+            if (Date.now() - data.start > (CONFIG.TRACKER.MAX_HOURS * 3600000)) {
+                STATE.activeTracks.delete(addr);
+                continue;
+            }
+
             const res = await axios.get(`${CONFIG.ENDPOINTS.TOKENS}${addr}`, { timeout: 3000, headers: Utils.getHeaders() });
             const pair = res.data?.pairs?.[0];
             if (!pair) continue;
-            const gain = (( (pair.fdv||pair.marketCap) - data.entryMcap) / data.entryMcap) * 100;
+
+            const currPrice = parseFloat(pair.priceUsd);
+            const currMcap = pair.fdv || pair.marketCap;
+            const liq = pair.liquidity?.usd || 0;
+
+            const gain = ((currMcap - data.entryMcap) / data.entryMcap) * 100;
+            
+            // 🧠 Update ALL Leaderboard Memories
             STATE.updatePeak(addr, gain, 'ACTIVE');
-            if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_1 && !data.t1) { await sendUpdate(data, pair.fdv, gain, 'GAIN'); data.t1 = true; }
+
+            if (currPrice < (data.entryPrice * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
+                STATE.updatePeak(addr, gain, 'RUG');
+                STATE.activeTracks.delete(addr);
+                continue;
+            }
+
+            if (gain > data.maxGain) data.maxGain = gain;
+
+            if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_1 && !data.t1) {
+                await sendUpdate(data, currMcap, gain, 'GAIN');
+                data.t1 = true;
+            } else if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_2 && !data.t2) {
+                await sendUpdate(data, currMcap, gain, 'MOON');
+                data.t2 = true;
+            } else if (gain >= CONFIG.TRACKER.GAIN_TRIGGER_3 && !data.t3) {
+                await sendUpdate(data, currMcap, gain, 'GOD');
+                data.t3 = true;
+            }
+
         } catch (e) {}
-        await Utils.sleep(1000);
+        await Utils.sleep(500);
     }
     setTimeout(runTracker, CONFIG.SYSTEM.TRACK_DELAY);
 }
 
-async function sendUpdate(data, mcap, gain, type) {
+async function sendUpdate(data, currentMcap, gain, type) {
     const channel = client.channels.cache.get(data.chanId);
     if (!channel) return;
     try {
         const msg = await channel.messages.fetch(data.msgId);
-        if (msg) await msg.reply({ content: `🚀 **${data.name}** is up **${gain.toFixed(0)}%**! (\`${Utils.formatUSD(mcap)}\`)` });
-    } catch (e) {}
+        if (!msg) return;
+
+        let color = '#00FF00'; let title = `🚀 GAIN: +${gain.toFixed(0)}%`;
+        if (type === 'MOON') { color = '#00D4FF'; title = `🌕 MOONSHOT: +${gain.toFixed(0)}%`; }
+        if (type === 'GOD') { color = '#FFD700'; title = `👑 GOD CANDLE: +${gain.toFixed(0)}%`; }
+
+        const bannerText = `GAIN +${gain.toFixed(0)}% | ${Utils.formatUSD(currentMcap)}`;
+        const bannerUrl = `https://placehold.co/600x200/00b140/ffffff/png?text=${encodeURIComponent(bannerText)}&font=roboto`;
+
+        // 🟢 COMPACT GAINS DESCRIPTION
+        const desc = `**${data.name} ($${data.symbol})**\nEntry: \`${Utils.formatUSD(data.entryMcap)}\`\nCurrent: \`${Utils.formatUSD(currentMcap)}\`\n[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`;
+
+        const embed = new EmbedBuilder()
+            .setColor(color)
+            .setTitle(title)
+            .setDescription(desc)
+            .setImage(bannerUrl) 
+            .setTimestamp();
+            
+        await msg.reply({ embeds: [embed] });
+        
+    } catch (e) { Utils.log('ERROR', 'Tracker', `Reply failed: ${e.message}`); }
 }
 
 // ==================================================================================
@@ -424,8 +583,11 @@ async function sendUpdate(data, mcap, gain, type) {
 // ==================================================================================
 
 client.on('interactionCreate', async interaction => {
-    if (interaction.isButton() && interaction.customId.startsWith('copy_')) {
-        await interaction.reply({ content: `${interaction.customId.split('_')[1]}`, ephemeral: true });
+    if (!interaction.isButton()) return;
+    
+    if (interaction.customId.startsWith('copy_')) {
+        const ca = interaction.customId.split('_')[1];
+        await interaction.reply({ content: `${ca}`, ephemeral: true });
     }
 });
 
@@ -440,14 +602,14 @@ const app = express();
 app.get('/', (req, res) => res.json({ status: 'ONLINE', version: CONFIG.VERSION }));
 app.listen(process.env.PORT || 3000);
 
-if (!process.env.DISCORD_TOKEN) {
-    console.error("❌ CRITICAL ERROR: DISCORD_TOKEN is missing in Render Environment Variables!");
-} else {
-    client.login(process.env.DISCORD_TOKEN).then(() => {
-        Utils.log('SUCCESS', 'System', `Logged in as ${client.user.tag}`);
-        scanProfiles(); scanBoosts(); scanSearch(); runTracker(); processQueue(); initScheduler();
-    }).catch(err => {
-        console.error("❌ LOGIN FAILED: Token invalid or Intents Missing.");
-        console.error(err);
-    });
-}
+client.once('ready', () => {
+    Utils.log('SUCCESS', 'System', `Logged in as ${client.user.tag}`);
+    scanProfiles();
+    scanBoosts();
+    scanSearch();
+    runTracker();
+    processQueue();
+    initScheduler();
+});
+
+client.login(process.env.DISCORD_TOKEN);
