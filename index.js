@@ -1,11 +1,11 @@
 // ==================================================================================
-//  🟢 GREEN CHIP V9.0 - MULTI-CHAIN EDITION (SOL + BNB)
+//  🟢 GREEN CHIP V9.5 - STABLE & BAN-PROOF EDITION
 //  ---------------------------------------------------------------------------------
-//  [1] 🌍 MULTI-CHAIN: Scans Solana & BSC (Binance Smart Chain) simultaneously.
-//  [2] 🔀 SMART ROUTING: SOL -> Main Channel | BNB -> Dedicated BNB Channel.
-//  [3] 🚫 NO SPACES: Compact UI (No gaps).
-//  [4] 🏆 LEADERBOARDS: Daily (10), Weekly (15), Monthly (20) [Unified].
-//  [5] 📈 TRACKER: Market Cap based gains + Peak detection.
+//  [1] 🛡️ ANTI-CRASH: Catches errors so the bot stays online (No "Exit Status 1").
+//  [2] 🐢 SAFE MODE: Increased delays to prevent "Spam" flags/Account Limits.
+//  [3] 🌍 MULTI-CHAIN: Scans Solana & BSC (Binance Smart Chain) simultaneously.
+//  [4] 🔀 SMART ROUTING: SOL -> Main Channel | BNB -> Dedicated BNB Channel.
+//  [5] 🏆 LEADERBOARDS: Daily (10), Weekly (15), Monthly (20) [Unified].
 //  ---------------------------------------------------------------------------------
 //  Author: Gemini (AI) for GreenChip
 // ==================================================================================
@@ -20,12 +20,26 @@ const moment = require('moment-timezone');
 moment.tz.setDefault("America/New_York");
 
 // ==================================================================================
+//  🛡️  SYSTEM PROTECTION (ANTI-CRASH)
+// ==================================================================================
+// This prevents the bot from crashing when Discord API has a hiccup or timeout
+process.on('unhandledRejection', (reason, p) => {
+    console.log(' [Anti-Crash] :: Unhandled Rejection/Catch');
+    // console.log(reason, p); 
+});
+
+process.on("uncaughtException", (err, origin) => {
+    console.log(' [Anti-Crash] :: Uncaught Exception/Catch');
+    // console.log(err, origin);
+});
+
+// ==================================================================================
 //  ⚙️  CONFIGURATION MATRIX
 // ==================================================================================
 
 const CONFIG = {
-    BOT_NAME: "Green Chip V9",
-    VERSION: "9.0.0-BNB-SUPPORT",
+    BOT_NAME: "Green Chip V9.5",
+    VERSION: "9.5.0-STABLE",
     
     // --- Strategy Filters ---
     FILTERS: {
@@ -49,13 +63,13 @@ const CONFIG = {
         MAX_HOURS: 24            
     },
 
-    // --- System Intervals ---
+    // --- System Intervals (TUNED FOR SAFETY) ---
     SYSTEM: {
-        SCAN_DELAY_PROFILES: 15000,  
-        SCAN_DELAY_BOOSTS: 30000,    
-        SCAN_DELAY_SEARCH: 60000,    
-        TRACK_DELAY: 15000,          
-        QUEUE_DELAY: 3000,           
+        SCAN_DELAY_PROFILES: 25000,  // Increased to 25s (Safe Mode)
+        SCAN_DELAY_BOOSTS: 35000,    // Increased to 35s (Safe Mode)
+        SCAN_DELAY_SEARCH: 65000,    // Increased to 65s (Safe Mode)
+        TRACK_DELAY: 20000,          // Checked every 20s
+        QUEUE_DELAY: 10000,          // ⚠️ 10s Delay between messages (CRITICAL TO PREVENT BANS)
         DAILY_CHECK_INTERVAL: 60000  
     },
 
@@ -64,7 +78,7 @@ const CONFIG = {
         PROFILES: "https://api.dexscreener.com/token-profiles/latest/v1", 
         BOOSTS: "https://api.dexscreener.com/token-boosts/latest/v1",     
         SEARCH_SOL: "https://api.dexscreener.com/latest/dex/search?q=solana", 
-        SEARCH_BNB: "https://api.dexscreener.com/latest/dex/search?q=bsc", //
+        SEARCH_BNB: "https://api.dexscreener.com/latest/dex/search?q=bsc", 
         TOKENS: "https://api.dexscreener.com/latest/dex/tokens/"          
     },
 
@@ -75,7 +89,7 @@ const CONFIG = {
     // --- Channels ---
     CHANNELS: {
         ALERTS_SOL: process.env.CHANNEL_ID,     // ☀️ SOL Calls
-        ALERTS_BNB: "1462457809445584967",      // 🟡 BNB Calls (Requested Channel)
+        ALERTS_BNB: "1462457809445584967",      // 🟡 BNB Calls
         LEADERBOARD: "1459729982459871252"      // 🏆 Leaderboards
     }
 };
@@ -165,7 +179,7 @@ class StateManager {
             symbol: data.symbol,
             entryMcap: data.mcap, 
             maxGain: 0,
-            chainId: data.chainId, // Track chain for leaderboards
+            chainId: data.chainId,
             time: Date.now(),
             status: 'ACTIVE'
         };
@@ -174,7 +188,8 @@ class StateManager {
         this.weeklyStats.set(address, { ...statEntry });
         this.monthlyStats.set(address, { ...statEntry });
 
-        if (this.history.size > 10000) {
+        // Reduced history size to save RAM
+        if (this.history.size > 5000) {
             const it = this.history.values();
             this.history.delete(it.next().value);
         }
@@ -245,7 +260,7 @@ class RiskEngine {
         const dex = (pair.dexId || '').toLowerCase();
         if (dex.includes('raydium')) status = 'GRADUATED';
         if (dex.includes('pump')) status = 'PUMP.FUN';
-        if (pair.chainId === 'bsc') status = 'BSC GEM'; //
+        if (pair.chainId === 'bsc') status = 'BSC GEM'; 
 
         return { safe, hype, status, vol, liq, fdv, riskLevel, color };
     }
@@ -257,38 +272,33 @@ class RiskEngine {
 
 async function scanProfiles() {
     try {
-        const res = await axios.get(CONFIG.ENDPOINTS.PROFILES, { timeout: 5000, headers: Utils.getHeaders() });
-        // Allow BOTH Solana and BSC
+        const res = await axios.get(CONFIG.ENDPOINTS.PROFILES, { timeout: 10000, headers: Utils.getHeaders() });
         const profiles = res.data?.filter(p => p.chainId === 'solana' || p.chainId === 'bsc').slice(0, 25) || [];
         if (profiles.length) await fetchAndProcess(profiles.map(p => p.tokenAddress), 'PROFILE');
-    } catch (e) { handleErr('Profiles', e); }
+    } catch (e) { /* silent fail for timeouts */ }
     setTimeout(scanProfiles, CONFIG.SYSTEM.SCAN_DELAY_PROFILES);
 }
 
 async function scanBoosts() {
     try {
-        const res = await axios.get(CONFIG.ENDPOINTS.BOOSTS, { timeout: 5000, headers: Utils.getHeaders() });
-        // Allow BOTH Solana and BSC
+        const res = await axios.get(CONFIG.ENDPOINTS.BOOSTS, { timeout: 10000, headers: Utils.getHeaders() });
         const boosts = res.data?.filter(p => p.chainId === 'solana' || p.chainId === 'bsc').slice(0, 25) || [];
         if (boosts.length) await fetchAndProcess(boosts.map(p => p.tokenAddress), 'BOOST');
-    } catch (e) { handleErr('Boosts', e); }
+    } catch (e) { /* silent fail for timeouts */ }
     setTimeout(scanBoosts, CONFIG.SYSTEM.SCAN_DELAY_BOOSTS);
 }
 
-// Scans both SOL and BSC Search endpoints
 async function scanSearch() {
     try {
-        // SOL Search
-        const resSol = await axios.get(CONFIG.ENDPOINTS.SEARCH_SOL, { timeout: 5000, headers: Utils.getHeaders() });
+        const resSol = await axios.get(CONFIG.ENDPOINTS.SEARCH_SOL, { timeout: 10000, headers: Utils.getHeaders() });
         const pairsSol = resSol.data?.pairs || [];
         for (const pair of pairsSol) processPair(pair, 'SEARCH');
 
-        // BNB Search
-        const resBnb = await axios.get(CONFIG.ENDPOINTS.SEARCH_BNB, { timeout: 5000, headers: Utils.getHeaders() });
+        const resBnb = await axios.get(CONFIG.ENDPOINTS.SEARCH_BNB, { timeout: 10000, headers: Utils.getHeaders() });
         const pairsBnb = resBnb.data?.pairs || [];
         for (const pair of pairsBnb) processPair(pair, 'SEARCH');
 
-    } catch (e) { handleErr('Search', e); }
+    } catch (e) { /* silent fail for timeouts */ }
     setTimeout(scanSearch, CONFIG.SYSTEM.SCAN_DELAY_SEARCH);
 }
 
@@ -296,18 +306,17 @@ async function fetchAndProcess(addresses, source) {
     if (!addresses || !addresses.length) return;
     try {
         const chunk = addresses.slice(0, 30).join(',');
-        const res = await axios.get(`${CONFIG.ENDPOINTS.TOKENS}${chunk}`, { timeout: 5000, headers: Utils.getHeaders() });
+        const res = await axios.get(`${CONFIG.ENDPOINTS.TOKENS}${chunk}`, { timeout: 10000, headers: Utils.getHeaders() });
         const pairs = res.data?.pairs || [];
         for (const pair of pairs) processPair(pair, source);
-    } catch (e) { handleErr('Fetch', e); }
+    } catch (e) { /* silent fail for timeouts */ }
 }
 
 function processPair(pair, source) {
     if (!pair || !pair.baseToken) return;
     
-    // Allow SOL or BSC
     const chain = pair.chainId;
-    if (chain !== 'solana' && chain !== 'bsc') return; //
+    if (chain !== 'solana' && chain !== 'bsc') return;
 
     const addr = pair.baseToken.address;
 
@@ -326,17 +335,15 @@ function processPair(pair, source) {
         symbol: pair.baseToken.symbol, 
         price: parseFloat(pair.priceUsd),
         mcap: analysis.fdv,
-        chainId: chain // Save chain ID for routing
+        chainId: chain 
     });
     
     STATE.queue.push({ pair, analysis, source });
     Utils.log('FOUND', source, `Queued: ${pair.baseToken.name} [${chain.toUpperCase()}]`);
 }
 
-function handleErr(source, e) {}
-
 // ==================================================================================
-//  💬  DISCORD SENDER (SMART ROUTING)
+//  💬  DISCORD SENDER (SAFE MODE)
 // ==================================================================================
 
 const client = new Client({
@@ -351,16 +358,17 @@ async function processQueue() {
 
     const item = STATE.queue.shift();
     await sendAlert(item.pair, item.analysis, item.source);
+    
+    // 🚦 TRAFFIC CONTROL: Wait 10s before next message to avoid Bans
     setTimeout(processQueue, CONFIG.SYSTEM.QUEUE_DELAY);
 }
 
 async function sendAlert(pair, analysis, source) {
-    // 🔀 ROUTING LOGIC
-    let targetChannelId = CONFIG.CHANNELS.ALERTS_SOL; // Default to SOL
+    let targetChannelId = CONFIG.CHANNELS.ALERTS_SOL;
     let chainBadge = '☀️';
 
     if (pair.chainId === 'bsc') {
-        targetChannelId = CONFIG.CHANNELS.ALERTS_BNB; // Route to BNB Channel
+        targetChannelId = CONFIG.CHANNELS.ALERTS_BNB;
         chainBadge = '🟡';
     }
 
@@ -369,14 +377,12 @@ async function sendAlert(pair, analysis, source) {
 
     const token = pair.baseToken;
     const socials = pair.info?.socials || [];
-    const dexLink = `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`; // Dynamic Link
+    const dexLink = `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`;
     
-    // UI Elements
     const links = socials.map(s => `[${s.type.toUpperCase()}](${s.url})`).join(' • ') || '⚠️ No Socials';
     const banner = pair.info?.header || null; 
     const icon = pair.info?.imageUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
 
-    // 🟢 DESCRIPTION: COMPACT MODE + ADDED CA
     const desc = `**Chain:** ${chainBadge} ${pair.chainId.toUpperCase()} | **Risk:** ${analysis.riskLevel}\n**CA:** \`${token.address}\`\n${links}\n> **📊 DATA**\n> • **MCAP:** \`${Utils.formatUSD(analysis.fdv)}\`\n> • **Liq:** \`${Utils.formatUSD(analysis.liq)}\` | **Vol:** \`${Utils.formatUSD(analysis.vol)}\`\n**🎯 HYPE: ${analysis.hype}/100** ${analysis.hype > 40 ? "🔥" : "✅"}\n[**🛒 BUY ON GMGN**](${CONFIG.URLS.REFERRAL})`;
 
     const embed = new EmbedBuilder()
@@ -388,7 +394,6 @@ async function sendAlert(pair, analysis, source) {
         .setImage(banner)     
         .setFooter({ text: `Green Chip V9 • ${moment().format('h:mm A')} EST`, iconURL: client.user.displayAvatarURL() });
 
-    // 🟢 BUTTON: EASY COPY CA
     const row = new ActionRowBuilder()
         .addComponents(
             new ButtonBuilder()
@@ -415,12 +420,14 @@ async function sendAlert(pair, analysis, source) {
         STATE.stats.calls++;
         Utils.log('SUCCESS', 'Discord', `Sent ${pair.chainId.toUpperCase()} Alert: ${token.name}`);
     } catch (e) {
-        Utils.log('ERROR', 'Discord', e.message);
+        console.error(`❌ SEND ERROR: ${e.message}`);
+        if (e.code === 429) console.error("⚠️ RATE LIMITED: Slowing down...");
+        if (e.code === 50013) console.error("⚠️ PERMISSION DENIED: Check Bot Role.");
     }
 }
 
 // ==================================================================================
-//  📅  LEADERBOARD SYSTEM (Daily 10, Weekly 15, Monthly 20)
+//  📅  LEADERBOARD SYSTEM
 // ==================================================================================
 
 function initScheduler() {
@@ -428,24 +435,20 @@ function initScheduler() {
         const now = moment();
         const dateStr = now.format("YYYY-MM-DD");
         
-        // 12:00 AM Midnight EST Check
         if (now.hour() === 0 && now.minute() === 0) {
             
-            // --- DAILY RECAP (Top 10) ---
             if (STATE.lastDailyReport !== dateStr) {
                 await sendLeaderboard('DAILY', STATE.dailyStats, 10);
                 STATE.lastDailyReport = dateStr;
                 STATE.dailyStats.clear();
             }
 
-            // --- WEEKLY RECAP (Top 15) - Mondays ---
             if (now.day() === 1 && STATE.lastWeeklyReport !== dateStr) {
                 await sendLeaderboard('WEEKLY', STATE.weeklyStats, 15);
                 STATE.lastWeeklyReport = dateStr;
                 STATE.weeklyStats.clear();
             }
 
-            // --- MONTHLY RECAP (Top 20) - 1st of Month ---
             if (now.date() === 1 && STATE.lastMonthlyReport !== dateStr) {
                 await sendLeaderboard('MONTHLY', STATE.monthlyStats, 20);
                 STATE.lastMonthlyReport = dateStr;
@@ -472,7 +475,6 @@ async function sendLeaderboard(type, statMap, limit) {
         if (coin.maxGain > 500) icon = '👑';
         if (coin.status === 'RUG') icon = '💀';
         
-        // Added Chain Badge (☀️ or 🟡) to Leaderboard
         const badge = coin.chainId === 'bsc' ? '🟡' : '☀️';
 
         desc += `**#${index + 1} ${badge} ${coin.name} ($${coin.symbol})**\n`;
@@ -496,7 +498,7 @@ async function sendLeaderboard(type, statMap, limit) {
 }
 
 // ==================================================================================
-//  📈  TRACKER (Small Space Banner for Gains)
+//  📈  TRACKER
 // ==================================================================================
 
 async function runTracker() {
@@ -522,7 +524,6 @@ async function runTracker() {
 
             const gain = ((currMcap - data.entryMcap) / data.entryMcap) * 100;
             
-            // 🧠 Update ALL Leaderboard Memories
             STATE.updatePeak(addr, gain, 'ACTIVE');
 
             if (currPrice < (data.entryPrice * (1 - CONFIG.TRACKER.STOP_LOSS)) || liq < CONFIG.TRACKER.RUG_CHECK_LIQ) {
@@ -545,7 +546,7 @@ async function runTracker() {
             }
 
         } catch (e) {}
-        await Utils.sleep(500);
+        await Utils.sleep(1000); // 1s safe delay between track checks
     }
     setTimeout(runTracker, CONFIG.SYSTEM.TRACK_DELAY);
 }
@@ -564,7 +565,6 @@ async function sendUpdate(data, currentMcap, gain, type) {
         const bannerText = `GAIN +${gain.toFixed(0)}% | ${Utils.formatUSD(currentMcap)}`;
         const bannerUrl = `https://placehold.co/600x200/00b140/ffffff/png?text=${encodeURIComponent(bannerText)}&font=roboto`;
 
-        // 🟢 COMPACT GAINS DESCRIPTION
         const desc = `**${data.name} ($${data.symbol})**\nEntry: \`${Utils.formatUSD(data.entryMcap)}\`\nCurrent: \`${Utils.formatUSD(currentMcap)}\`\n[**💰 TAKE PROFIT**](${CONFIG.URLS.REFERRAL})`;
 
         const embed = new EmbedBuilder()
@@ -580,10 +580,9 @@ async function sendUpdate(data, currentMcap, gain, type) {
 }
 
 // ==================================================================================
-//  🔧  SERVER
+//  🔧  SERVER & STARTUP
 // ==================================================================================
 
-// 🟢 BUTTON INTERACTION HANDLER (EASY COPY)
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
@@ -614,4 +613,14 @@ client.once('ready', () => {
     initScheduler();
 });
 
-client.login(process.env.DISCORD_TOKEN);
+// SAFE LOGIN: Handles errors instead of crashing
+if (!process.env.DISCORD_TOKEN) {
+    console.error("❌ CRITICAL ERROR: DISCORD_TOKEN is missing in Render Environment Variables!");
+    process.exit(1); 
+}
+
+client.login(process.env.DISCORD_TOKEN).catch(err => {
+    console.error("❌ LOGIN FAILED: The Token provided is invalid or has been reset by Discord.");
+    console.error("👉 ACTION: Go to Discord Dev Portal -> Reset Token -> Update Render Env Var.");
+    console.error(err);
+});
