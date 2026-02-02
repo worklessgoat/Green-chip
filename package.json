@@ -1,7 +1,6 @@
 {
-  "name": "green-chip-bot",
-  "version": "1.0.0",
-  "description": "Green Chip Bot",
+  "name": "green-chip-v9",
+  "version": "9.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
