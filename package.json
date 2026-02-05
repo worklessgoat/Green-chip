@@ -1,6 +1,8 @@
 {
   "name": "green-chip-v9",
   "version": "9.0.0",
+  "private": true,
+  "license": "UNLICENSED",
   "description": "Multi-chain Discord Sniper & Tracker",
   "main": "index.js",
   "scripts": {
